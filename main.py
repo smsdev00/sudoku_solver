@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import os
 from typing import List, Tuple, Optional, Dict
+from sudoku import Sudoku  # Importar la librería py-sudoku
 
 class SudokuBoardDetector:
     """
@@ -12,7 +13,7 @@ class SudokuBoardDetector:
     def __init__(self, config: Optional[Dict] = None):
         self.config = config if config is not None else {}
         self.GRID_SIZE = 9
-        self.UMBRAL_ACEPTACION = 0.82  # Umbral que funciona en template_matching.py
+        self.UMBRAL_ACEPTACION = 0.7  # Umbral que funciona en template_matching.py
         # Cargar las plantillas de dígitos al inicializar la clase
         self.templates = self._cargar_templates()
 
@@ -271,12 +272,186 @@ class SudokuBoardDetector:
 
         return grilla
 
+    def resolver_con_pysudoku(self, grilla: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Resuelve el Sudoku usando la librería py-sudoku.
+
+        Args:
+            grilla: Array 9x9 con 0 en celdas vacías
+
+        Returns:
+            Array 9x9 resuelto o None si no tiene solución
+        """
+        try:
+            # Convertir el array numpy a lista de listas
+            board = grilla.tolist()
+
+            # Crear un objeto Sudoku con la grilla detectada
+            puzzle = Sudoku(3, 3, board=board)
+
+            # Verificar si el puzzle es válido
+            if not puzzle.validate():
+                print("[ERROR] El Sudoku detectado no es válido")
+                return None
+
+            # Resolver el puzzle
+            solved = puzzle.solve()
+
+            if solved:
+                # Obtener la grilla resuelta como array numpy
+                grilla_resuelta = np.array(solved.board)
+                return grilla_resuelta
+            else:
+                print("[ERROR] No se pudo resolver el Sudoku")
+                return None
+
+        except Exception as e:
+            print(f"[ERROR] Error al resolver con py-sudoku: {e}")
+            return None
+
+    def resolver_y_mostrar(self, imagen_path: str) -> Optional[np.ndarray]:
+        """
+        Proceso completo: detectar, reconocer y resolver Sudoku usando py-sudoku.
+
+        Args:
+            imagen_path: Ruta a la imagen del Sudoku
+
+        Returns:
+            Array 9x9 resuelto o None si falla
+        """
+        # 1. Obtener grilla del Sudoku
+        grilla_detectada = self.obtener_grilla_final(imagen_path)
+
+        if grilla_detectada is None:
+            return None
+
+        print("\n[Grilla detectada (0 = vacío):]")
+        print(grilla_detectada)
+
+        # 2. Resolver el Sudoku con py-sudoku
+        print("\n[Resolviendo con py-sudoku...]")
+        grilla_resuelta = self.resolver_con_pysudoku(grilla_detectada)
+
+        if grilla_resuelta is not None:
+            print("\n[Grilla resuelta con py-sudoku:]")
+            print(grilla_resuelta)
+
+            # Mostrar comparación
+            print("\n[Comparación:]")
+            for i in range(9):
+                fila_detectada = " ".join(str(x) if x != 0 else "." for x in grilla_detectada[i])
+                fila_resuelta = " ".join(str(x) for x in grilla_resuelta[i])
+                print(f"Fila {i+1}: {fila_detectada}   ->   {fila_resuelta}")
+
+        return grilla_resuelta
+
+    def obtener_diferencia(self, original: np.ndarray, resuelta: np.ndarray) -> List[Tuple[int, int, int]]:
+        """
+        Obtiene las celdas que fueron llenadas por el solver.
+
+        Args:
+            original: Grilla original (con 0 en vacíos)
+            resuelta: Grilla resuelta
+
+        Returns:
+            Lista de tuplas (fila, col, valor) con las celdas llenadas
+        """
+        diferencia = []
+        for i in range(9):
+            for j in range(9):
+                if original[i, j] == 0 and resuelta[i, j] != 0:
+                    diferencia.append((i, j, resuelta[i, j]))
+        return diferencia
+
+    def visualizar_solucion(self, imagen_path: str, output_path: Optional[str] = None) -> Optional[np.ndarray]:
+        """
+        Visualiza la solución superpuesta en la imagen original.
+
+        Args:
+            imagen_path: Ruta a la imagen del Sudoku
+            output_path: Ruta para guardar la imagen resultante (opcional)
+
+        Returns:
+            Imagen con la solución superpuesta
+        """
+        # Cargar la imagen original
+        imagen_original = cv2.imread(imagen_path)
+        if imagen_original is None:
+            print(f"[ERROR] No se pudo cargar la imagen: {imagen_path}")
+            return None
+
+        # Obtener la grilla detectada y resuelta
+        grilla_detectada = self.obtener_grilla_final(imagen_path)
+        if grilla_detectada is None:
+            return None
+
+        grilla_resuelta = self.resolver_con_pysudoku(grilla_detectada)
+        if grilla_resuelta is None:
+            return None
+
+        # Detectar el tablero para obtener sus coordenadas
+        resultados_deteccion = self.detectar_tablero(imagen_original)
+        if resultados_deteccion is None:
+            return None
+
+        x, y, w, h = resultados_deteccion["board_area_coords"]
+
+        # Crear una copia para dibujar
+        imagen_resultado = imagen_original.copy()
+
+        # Calcular dimensiones de cada celda
+        cell_w = w // 9
+        cell_h = h // 9
+
+        # Dibujar los números de la solución en las celdas vacías
+        for i in range(9):
+            for j in range(9):
+                if grilla_detectada[i, j] == 0:  # Solo dibujar en celdas vacías
+                    # Calcular posición del texto
+                    text_x = x + j * cell_w + cell_w // 3
+                    text_y = y + i * cell_h + 2 * cell_h // 3
+
+                    # Dibujar el número de la solución
+                    numero = str(grilla_resuelta[i, j])
+                    cv2.putText(imagen_resultado, numero,
+                               (text_x, text_y),
+                               cv2.FONT_HERSHEY_SIMPLEX,
+                               0.8, (0, 0, 255), 2)  # Rojo para la solución
+
+        # Dibujar un rectángulo alrededor del tablero
+        cv2.rectangle(imagen_resultado, (x, y), (x + w, y + h), (0, 255, 0), 3)
+
+        # Mostrar la imagen
+        cv2.imshow("Sudoku Resuelto", imagen_resultado)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+        # Guardar la imagen si se especifica una ruta de salida
+        if output_path:
+            cv2.imwrite(output_path, imagen_resultado)
+            print(f"[INFO] Imagen guardada en: {output_path}")
+
+        return imagen_resultado
+
 # --- Ejemplo de Uso ---
 if __name__ == '__main__':
     detector = SudokuBoardDetector()
-    # Asegúrese de que './imgs/facil_1.png' y la carpeta './templates/' existen.
-    grilla_resultante = detector.obtener_grilla_final('./imgs/facil_1.png')
+
+    # Opción 1: Solo obtener la grilla
+    grilla_resultante = detector.obtener_grilla_final('./imgs/facil_2.png')
 
     if grilla_resultante is not None:
         print("\nResultado final (lista de listas):")
         print(grilla_resultante.tolist())
+
+        # Opción 2: Resolver con py-sudoku
+        grilla_resuelta = detector.resolver_con_pysudoku(grilla_resultante)
+        if grilla_resuelta is not None:
+            print("\nSolución (lista de listas):")
+            print(grilla_resuelta.tolist())
+
+    # Opción 3: Proceso completo con visualización
+    # detector.resolver_y_mostrar('./imgs/facil_1.png')
+
+    # Opción 4: Visualizar solución en la imagen
+    # detector.visualizar_solucion('./imgs/facil_1.png', './imgs/solucion.png')
