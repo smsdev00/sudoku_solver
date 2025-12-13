@@ -10,17 +10,38 @@ class SudokuBoardDetector:
     """
     
     def __init__(self, config: Optional[Dict] = None):
-        # ... (código __init__ sin cambios) ...
         self.config = config if config is not None else {}
         self.GRID_SIZE = 9
-        self.TESSERACT_CONFIG = r'--oem 3 --psm 10 -c tessedit_char_whitelist=123456789'
-        
-        # Si Tesseract no está en el PATH, debe configurarse aquí:
-        # pytesseract.pytesseract.tesseract_cmd = r'/ruta/a/tesseract.exe'
+        self.templates = self._cargar_templates()
+        # Nota: Si Tesseract no está en el PATH, debe configurarse aquí.
 
+    def _cargar_templates(self) -> Dict[int, np.ndarray]:
+        """
+        Carga y preprocesa las imágenes de los dígitos (templates) para Template Matching.
+        Se asume que los archivos se llaman '1.png', '2.png', etc., y están en ./templates/
+        """
+        templates = {}
+        print("[Setup] Cargando templates de dígitos...")
+        for i in range(1, self.GRID_SIZE + 1):
+            # NOTA: Ajuste la ruta de ser necesario
+            template_path = f'./templates/{i}.png' 
+            template_img = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
+            
+            if template_img is None:
+                print(f"[ERROR] No se pudo cargar el template: {template_path}. Template Matching fallará.")
+                continue
 
-    # Suponiendo que está usando la clase SudokuBoardDetector
+            # Invertir para que el dígito sea NEGRO sobre fondo BLANCO (consistente con el preprocesamiento de celda)
+            # Esto es clave: si el template tiene dígito oscuro, debe invertirse aquí o en el preprocesamiento de celda.
+            _, template_bin = cv2.threshold(template_img, 120, 255, cv2.THRESH_BINARY_INV)
+            template_bin = cv2.bitwise_not(template_bin) 
 
+            # Redimensionar el template es Opcional, pero recomendable si los templates son muy grandes.
+            # Por simplicidad, se utiliza la imagen cargada directamente, asumiendo un tamaño razonable.
+            templates[i] = template_bin
+            
+        return templates
+    
     def detectar_tablero(self, imagen: np.ndarray) -> Optional[Dict]:
         """
         1. Preprocesa la imagen.
@@ -37,21 +58,16 @@ class SudokuBoardDetector:
         # 2. Encontrar contornos
         contornos, _ = cv2.findContours(imagen_procesada, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         
-        # Inicializar variables de búsqueda
         contorno_tablero_optimo = None
         max_area = 0
-        
-        # Copia para visualizar
         imagen_vis = imagen.copy() 
         
-        # 3. Seleccionar el contorno del tablero 9x9 (el más grande y cuadrado)
+        # 3. Seleccionar el contorno del tablero 9x9
         for contorno in contornos:
             area = cv2.contourArea(contorno)
             x, y, w, h = cv2.boundingRect(contorno)
             aspect_ratio = float(w) / h
             
-            # Criterios para el tablero principal (gran tamaño, cuadrado)
-            # El umbral de área DEBE ajustarse al tamaño de su imagen.
             if area > 10000 and 0.9 <= aspect_ratio <= 1.1: 
                 if area > max_area:
                     max_area = area
@@ -60,16 +76,13 @@ class SudokuBoardDetector:
         resultados = {
             "roi_tablero": None,
             "board_area_coords": None,
-            "sub_grids_coords": [] # Lista para los 9 bloques 3x3
+            "sub_grids_coords": [] 
         }
 
         if contorno_tablero_optimo is not None:
             x, y, w, h = cv2.boundingRect(contorno_tablero_optimo)
             
-            # Guardar coordenadas del tablero principal
             resultados["board_area_coords"] = (x, y, w, h)
-            
-            # Retorna la sub-imagen (ROI) para el siguiente paso de segmentación de números
             roi_tablero = imagen[y:y+h, x:x+w]
             resultados["roi_tablero"] = roi_tablero
 
@@ -77,60 +90,36 @@ class SudokuBoardDetector:
             cv2.drawContours(imagen_vis, [contorno_tablero_optimo], 0, (0, 0, 255), 3)
 
             # --- Detección de las 9 Sub-Grillas (Bloques 3x3) ---
-            
-            # La dificultad de buscar los 9 bloques con contornos es que las líneas 
-            # de la grilla pueden ser más gruesas para estos, pero también pueden ser
-            # contornos de los números. 
-            
-            # Simplificación: Asumiremos que los 9 bloques son los 9 cuadrados más grandes
-            # después del tablero principal, O que la segmentación geométrica es más robusta.
-            
-            # Para este TEST, buscamos otros contornos cuadrados grandes que estén DENTRO del tablero
-            
+            # (Lógica para encontrar y dibujar contornos AZULES)
             contornos_bloque = []
-            
-            # Iteramos de nuevo sobre todos los contornos para encontrar las 9 sub-grillas
             for contorno in contornos:
                 area = cv2.contourArea(contorno)
                 x_c, y_c, w_c, h_c = cv2.boundingRect(contorno)
                 aspect_ratio_c = float(w_c) / h_c
                 
-                # Criterios para Sub-Grillas (Bloques 3x3):
-                # a) Debe estar contenido dentro del contorno principal.
-                # b) Debe ser un cuadrado (0.9 <= aspect_ratio <= 1.1).
-                # c) El área debe ser aproximadamente 1/9 del área total (ej. 8% a 15%).
-                
+                # Criterios para Sub-Grillas (debe estar dentro del tablero principal)
                 if (x <= x_c and y <= y_c and x + w >= x_c + w_c and y + h >= y_c + h_c):
                     if 0.9 <= aspect_ratio_c <= 1.1:
-                        # Si el área es al menos 1/12 del área total (ajustar umbral)
                         if area > max_area / 12.0 and area < max_area * 0.9: 
                             contornos_bloque.append(contorno)
                             
             # 5. Pintar y guardar los resultados de las sub-grillas
             if contornos_bloque:
-                # Ordenar por tamaño y tomar los 9 (o el número máximo encontrado)
                 contornos_bloque.sort(key=cv2.contourArea, reverse=True)
-                
-                # Seleccionar los 9 contornos más grandes (o menos si no se encontraron 9)
                 contornos_bloque_final = contornos_bloque[:9] 
                 
                 for contorno_bloque in contornos_bloque_final:
                     x_b, y_b, w_b, h_b = cv2.boundingRect(contorno_bloque)
-                    
-                    # Dibujar en AZUL (255, 0, 0)
                     cv2.rectangle(imagen_vis, (x_b, y_b), (x_b + w_b, y_b + h_b), (255, 0, 0), 2)
-                    
-                    # Guardar coordenadas de la sub-grilla
                     resultados["sub_grids_coords"].append((x_b, y_b, w_b, h_b))
 
             # 6. Visualización Final
-            #cv2.imshow("Tablero y Sub-Grillas Detectados (Rojo=Tablero, Azul=Bloques)", imagen_vis)
-            #cv2.waitKey(0)
-            #cv2.destroyAllWindows()
+            cv2.imshow("Tablero y Sub-Grillas Detectados (Rojo=Tablero, Azul=Bloques)", imagen_vis)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
             
             return resultados
         
-        # Si no se encontró el contorno óptimo
         else:
             print("[ERROR] No se pudo encontrar un contorno de tablero principal con criterios adecuados.")
             cv2.imshow("No se detecto Tablero", imagen_vis)
@@ -140,9 +129,11 @@ class SudokuBoardDetector:
         return None
 
     def _preparar_imagen(self, imagen: np.ndarray) -> np.ndarray:
-        # ... (código _preparar_imagen sin cambios) ...
+        """
+        Preprocesamiento de la imagen: escala de grises y umbralización adaptativa.
+        """
         gris = cv2.cvtColor(imagen, cv2.COLOR_BGR2GRAY)
-        # Umbralización Adaptativa para manejar diferentes iluminaciones
+        # THRESH_BINARY_INV: Invertido para que los contornos se detecten en la grilla oscura
         binaria = cv2.adaptiveThreshold(
             gris, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
         )
@@ -152,7 +143,7 @@ class SudokuBoardDetector:
                          roi_tablero_original: Optional[np.ndarray] = None) -> List[np.ndarray]:
         """
         Divide la imagen del tablero (ROI) en 81 sub-imágenes (celdas) y 
-        OPCIONALMENTE visualiza los contornos de celda en amarillo.
+        visualiza los contornos de celda en amarillo.
         """
         print("[Paso 2] Segmentando 81 celdas...")
         h, w = roi_tablero_gris.shape[:2]
@@ -178,7 +169,6 @@ class SudokuBoardDetector:
                 
                 # --- Visualización de celdas (Amarillo: 0, 255, 255) ---
                 if imagen_vis is not None:
-                    # Dibujar el rectángulo en la copia a color
                     cv2.rectangle(imagen_vis, (x_min, y_min), (x_max, y_max), (0, 255, 255), 1)
 
         if imagen_vis is not None:
@@ -189,70 +179,87 @@ class SudokuBoardDetector:
         return celdas
 
     def reconocer_digito(self, celda_img: np.ndarray) -> int:
-        # ... (código reconocer_digito sin cambios) ...
-        # 1. Comprobar si la celda está vacía ( placeholder )
-        # Por ejemplo, contar píxeles no blancos en el centro de la celda
-        if np.count_nonzero(celda_img[10:-10, 10:-10]) < 50:
-             return 0
+        """
+        Aplica Preprocesamiento y luego Template Matching para determinar el número en la celda.
+        """
+        h, w = celda_img.shape[:2]
         
-        # 2. Aplicar OCR (Tesseract)
-        try:
-            texto = pytesseract.image_to_string(
-                celda_img, 
-                config=self.TESSERACT_CONFIG
-            )
-            
-            # Limpiar y convertir a entero
-            digito_str = texto.strip().replace('\n', '')
-            if digito_str.isdigit():
-                return int(digito_str[0])
-            
-        except Exception as e:
-            # print(f"Error OCR: {e}") # Para debugging
-            pass
-            
-        # Si no se pudo reconocer o está vacío/ruido
-        return 0
+        # 1. Preprocesamiento: Recortar y Binarizar (Mismo que antes)
+        margin = h // 6 
+        center_img = celda_img[margin: h - margin, margin: w - margin]
+        center_img = cv2.medianBlur(center_img, 3) 
+        
+        # Dígito BLANCO, Fondo NEGRO.
+        _, celda_binarizada = cv2.threshold(center_img, 120, 255, cv2.THRESH_BINARY_INV)
 
+        # 2. Comprobar si la celda está vacía (Mismo que antes)
+        if np.count_nonzero(celda_binarizada) < 150: 
+            return 0
+        
+        # 3. Preparar imagen para Template Matching: Negro sobre Blanco (Consistente con templates)
+        # El dígito se invierte a NEGRO sobre fondo BLANCO
+        celda_match = cv2.bitwise_not(celda_binarizada)
+        
+        # --- 4. Template Matching ---
+        mejor_match = 0
+        mejor_digito = 0
+        
+        for digito, template in self.templates.items():
+            # Redimensionar el template para que coincida con la celda (opcional, si los tamaños son fijos)
+            # Aquí redimensionamos el template al tamaño de la ROI de la celda.
+            template_resized = cv2.resize(template, (celda_match.shape[1], celda_match.shape[0]))
+            
+            # Aplicar Template Matching. Usamos CCOEFF_NORMED para que la correlación sea entre 0 y 1.
+            resultado = cv2.matchTemplate(celda_match, template_resized, cv2.TM_CCOEFF_NORMED)
+            
+            # Obtener el valor máximo de coincidencia
+            _, max_val, _, _ = cv2.minMaxLoc(resultado)
+            
+            # Se puede mostrar la celda y el match para debug.
+            # print(f"Digito {digito}: Match = {max_val:.4f}")
+            
+            # Actualizar el mejor match
+            if max_val > mejor_match:
+                mejor_match = max_val
+                mejor_digito = digito
+                
+        # 5. Criterio de Aceptación: Si el mejor match es alto, se acepta el dígito
+        # Este umbral puede requerir ajuste (ej. 0.8 para una coincidencia fuerte)
+        UMBRAL_ACEPTACION = 0.7 
+        
+        if mejor_match >= UMBRAL_ACEPTACION:
+            return mejor_digito
+        else:
+            # Si el match es bajo, se considera que no se ha reconocido un dígito válido (podría ser ruido)
+            return 0
+        
     def obtener_grilla_final(self, imagen_path: str) -> Optional[np.ndarray]:
         """
         Orquesta el proceso completo para obtener la matriz 9x9 del Sudoku.
-        
-        Flujo:
-        1. Carga la imagen.
-        2. Detecta el tablero principal y las 9 sub-grillas (usa detectar_tablero).
-        3. Segmenta la ROI del tablero en 81 celdas (con visualización en AMARILLO).
-        4. Reconoce el dígito en cada celda (usa reconocer_digito con preprocesamiento local).
-        5. Construye y retorna la matriz 9x9 final.
         """
         imagen = cv2.imread(imagen_path)
         if imagen is None:
             print(f"[ERROR] No se pudo cargar la imagen: {imagen_path}")
             return None
         
-        # 1. Detectar y aislar el tablero (Retorna un Dict con "roi_tablero")
-        # Esto ejecuta la visualización de contornos ROJOS (Tablero) y AZULES (Sub-grillas)
+        # 1. Detectar y aislar el tablero 
         resultados_deteccion = self.detectar_tablero(imagen)
         
         if resultados_deteccion is None or resultados_deteccion.get("roi_tablero") is None:
             print("[ERROR] No se pudo detectar el tablero de Sudoku o la ROI es nula.")
             return None
             
-        # Extraer la ROI del tablero (sub-imagen de la grilla 9x9)
         roi_tablero = resultados_deteccion["roi_tablero"]
         
-        # Preparación para segmentación y OCR: necesitamos la versión en GRIS
-        # y mantenemos la versión a color para la visualización de las 81 celdas.
+        # Preparación para segmentación y OCR
         if len(roi_tablero.shape) == 3:
              roi_tablero_gris = cv2.cvtColor(roi_tablero, cv2.COLOR_BGR2GRAY)
-             # Guardamos la versión a color para la visualización de celdas
              roi_tablero_original_color = roi_tablero.copy() 
         else:
              roi_tablero_gris = roi_tablero
              roi_tablero_original_color = None
 
-        # 2. Segmentar las 81 celdas (usando segmentación geométrica)
-        # Se pasa la ROI a color como segundo parámetro para la visualización en amarillo
+        # 2. Segmentar las 81 celdas (Esto también ejecuta la visualización AMARILLA)
         celdas_img_list = self.segmentar_celdas(roi_tablero_gris, roi_tablero_original_color)
         
         # 3. Reconocer los dígitos y construir la grilla
@@ -262,25 +269,18 @@ class SudokuBoardDetector:
         for i, celda_img in enumerate(celdas_img_list):
             r, c = divmod(i, self.GRID_SIZE)
             
-            # La función reconocer_digito debe incluir el preprocesamiento local
-            # (binarización) para mejorar la precisión del OCR.
             digito = self.reconocer_digito(celda_img)
             grilla[r, c] = digito
             
         print("[OK] Grilla obtenida con éxito.")
         
-        # Opcional: Imprimir la grilla numérica final (para debugging)
-        #print("\nGrilla de Sudoku detectada:")
-        #print(grilla)
+        # Mostrar la grilla final
+        print("\nGrilla de Sudoku detectada:")
+        print(grilla)
 
         return grilla
 
 # --- Ejemplo de Uso ---
 if __name__ == '__main__':
     detector = SudokuBoardDetector()
-#      Reemplace 'path/to/sudoku_image.png' con una ruta de prueba
-    grilla_resultante = detector.obtener_grilla_final('./imgs/facil_1.png') 
-    
-    # Si grilla_resultante es None, es porque la función detectó y se detuvo
-    if grilla_resultante is not None:
-        print(grilla_resultante)
+    grilla_resultante = detector.obtener_grilla_final('./imgs/facil_1.png')
