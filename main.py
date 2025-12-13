@@ -124,9 +124,9 @@ class SudokuBoardDetector:
                     resultados["sub_grids_coords"].append((x_b, y_b, w_b, h_b))
 
             # 6. Visualización Final
-            cv2.imshow("Tablero y Sub-Grillas Detectados (Rojo=Tablero, Azul=Bloques)", imagen_vis)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
+            #cv2.imshow("Tablero y Sub-Grillas Detectados (Rojo=Tablero, Azul=Bloques)", imagen_vis)
+            #cv2.waitKey(0)
+            #cv2.destroyAllWindows()
             
             return resultados
         
@@ -270,8 +270,8 @@ class SudokuBoardDetector:
         print("[OK] Grilla obtenida con éxito.")
         
         # Opcional: Imprimir la grilla numérica final (para debugging)
-        print("\nGrilla de Sudoku detectada:")
-        print(grilla)
+        #print("\nGrilla de Sudoku detectada:")
+        #print(grilla)
 
         return grilla
 
