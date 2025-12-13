@@ -148,14 +148,21 @@ class SudokuBoardDetector:
         )
         return binaria
 
-    def segmentar_celdas(self, roi_tablero: np.ndarray) -> List[np.ndarray]:
-        # ... (código segmentar_celdas sin cambios) ...
+    def segmentar_celdas(self, roi_tablero_gris: np.ndarray, 
+                         roi_tablero_original: Optional[np.ndarray] = None) -> List[np.ndarray]:
+        """
+        Divide la imagen del tablero (ROI) en 81 sub-imágenes (celdas) y 
+        OPCIONALMENTE visualiza los contornos de celda en amarillo.
+        """
         print("[Paso 2] Segmentando 81 celdas...")
-        h, w = roi_tablero.shape[:2]
+        h, w = roi_tablero_gris.shape[:2]
         
         celdas = []
         cell_w = w // self.GRID_SIZE
         cell_h = h // self.GRID_SIZE
+        
+        # Copia para dibujar si se proporciona la imagen original a color
+        imagen_vis = roi_tablero_original.copy() if roi_tablero_original is not None else None
         
         for r in range(self.GRID_SIZE):
             for c in range(self.GRID_SIZE):
@@ -165,10 +172,20 @@ class SudokuBoardDetector:
                 x_min = c * cell_w
                 x_max = (c + 1) * cell_w
                 
-                # Extraer la imagen de la celda
-                celda_img = roi_tablero[y_min:y_max, x_min:x_max]
+                # Extraer la imagen de la celda (usando la versión en GRIS para OCR)
+                celda_img = roi_tablero_gris[y_min:y_max, x_min:x_max]
                 celdas.append(celda_img)
                 
+                # --- Visualización de celdas (Amarillo: 0, 255, 255) ---
+                if imagen_vis is not None:
+                    # Dibujar el rectángulo en la copia a color
+                    cv2.rectangle(imagen_vis, (x_min, y_min), (x_max, y_max), (0, 255, 255), 1)
+
+        if imagen_vis is not None:
+            cv2.imshow("Segmentacion 81 Celdas (Amarillo)", imagen_vis)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+            
         return celdas
 
     def reconocer_digito(self, celda_img: np.ndarray) -> int:
@@ -203,9 +220,9 @@ class SudokuBoardDetector:
         
         Flujo:
         1. Carga la imagen.
-        2. Detecta el tablero principal y las 9 sub-grillas (usa detecta_tablero).
-        3. Segmenta la ROI del tablero en 81 celdas (usa segmentar_celdas).
-        4. Reconoce el dígito en cada celda (usa reconocer_digito).
+        2. Detecta el tablero principal y las 9 sub-grillas (usa detectar_tablero).
+        3. Segmenta la ROI del tablero en 81 celdas (con visualización en AMARILLO).
+        4. Reconoce el dígito en cada celda (usa reconocer_digito con preprocesamiento local).
         5. Construye y retorna la matriz 9x9 final.
         """
         imagen = cv2.imread(imagen_path)
@@ -214,26 +231,29 @@ class SudokuBoardDetector:
             return None
         
         # 1. Detectar y aislar el tablero (Retorna un Dict con "roi_tablero")
-        # Aquí se ejecuta la lógica de contornos ROJOS y AZULES
+        # Esto ejecuta la visualización de contornos ROJOS (Tablero) y AZULES (Sub-grillas)
         resultados_deteccion = self.detectar_tablero(imagen)
         
         if resultados_deteccion is None or resultados_deteccion.get("roi_tablero") is None:
             print("[ERROR] No se pudo detectar el tablero de Sudoku o la ROI es nula.")
-            # La visualización y error ya fue manejada dentro de detectar_tablero
             return None
             
         # Extraer la ROI del tablero (sub-imagen de la grilla 9x9)
         roi_tablero = resultados_deteccion["roi_tablero"]
         
-        # Opcional: Si la ROI del tablero no es gris, convertirla a escala de grises
-        # para que segmentar_celdas y reconocer_digito funcionen correctamente
+        # Preparación para segmentación y OCR: necesitamos la versión en GRIS
+        # y mantenemos la versión a color para la visualización de las 81 celdas.
         if len(roi_tablero.shape) == 3:
              roi_tablero_gris = cv2.cvtColor(roi_tablero, cv2.COLOR_BGR2GRAY)
+             # Guardamos la versión a color para la visualización de celdas
+             roi_tablero_original_color = roi_tablero.copy() 
         else:
              roi_tablero_gris = roi_tablero
+             roi_tablero_original_color = None
 
-        # 2. Segmentar las 81 celdas (usa segmentación geométrica)
-        celdas_img_list = self.segmentar_celdas(roi_tablero_gris)
+        # 2. Segmentar las 81 celdas (usando segmentación geométrica)
+        # Se pasa la ROI a color como segundo parámetro para la visualización en amarillo
+        celdas_img_list = self.segmentar_celdas(roi_tablero_gris, roi_tablero_original_color)
         
         # 3. Reconocer los dígitos y construir la grilla
         grilla = np.zeros((self.GRID_SIZE, self.GRID_SIZE), dtype=int)
@@ -242,23 +262,24 @@ class SudokuBoardDetector:
         for i, celda_img in enumerate(celdas_img_list):
             r, c = divmod(i, self.GRID_SIZE)
             
-            # NOTA: Para aumentar la robustez de OCR, la imagen de la celda
-            # debe preprocesarse localmente (ej. binarización, centrado)
-            
+            # La función reconocer_digito debe incluir el preprocesamiento local
+            # (binarización) para mejorar la precisión del OCR.
             digito = self.reconocer_digito(celda_img)
             grilla[r, c] = digito
             
-            # Opcional: Dibujar el resultado del dígito en la imagen para depuración
-            # Se podría dibujar en una copia del roi_tablero para ver la precisión del OCR
-            
         print("[OK] Grilla obtenida con éxito.")
+        
+        # Opcional: Imprimir la grilla numérica final (para debugging)
+        print("\nGrilla de Sudoku detectada:")
+        print(grilla)
+
         return grilla
 
 # --- Ejemplo de Uso ---
 if __name__ == '__main__':
     detector = SudokuBoardDetector()
 #      Reemplace 'path/to/sudoku_image.png' con una ruta de prueba
-    grilla_resultante = detector.obtener_grilla_final('./facil_1.png') 
+    grilla_resultante = detector.obtener_grilla_final('./imgs/facil_1.png') 
     
     # Si grilla_resultante es None, es porque la función detectó y se detuvo
     if grilla_resultante is not None:
