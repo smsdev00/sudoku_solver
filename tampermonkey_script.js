@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Solucionador de Sudoku con Backtracking
 // @namespace    http://tampermonkey.net/
-// @version      4.0
+// @version      4.1
 // @description  Extrae y resuelve sudokus en sudoku-online.org usando backtracking eficiente
 // @author       Asistente de Código
 // @match *://*.sudoku-online.org/*
@@ -24,7 +24,7 @@
             padding: 15px;
             z-index: 10000;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            width: 280px;
+            width: 320px;
             font-family: Arial, sans-serif;
         }
 
@@ -73,6 +73,22 @@
 
         .sudoku-solver-btn.orange:hover {
             background: #F57C00;
+        }
+
+        .sudoku-solver-btn.purple {
+            background: #9C27B0;
+        }
+
+        .sudoku-solver-btn.purple:hover {
+            background: #7B1FA2;
+        }
+
+        .sudoku-solver-btn.red {
+            background: #F44336;
+        }
+
+        .sudoku-solver-btn.red:hover {
+            background: #D32F2F;
         }
 
         .sudoku-solver-status {
@@ -146,10 +162,57 @@
             animation: pulse 0.5s;
         }
 
+        .sudoku-solver-auto-controls {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            border: 1px solid #eee;
+        }
+
+        .sudoku-solver-input-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .sudoku-solver-input-group label {
+            flex: 1;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .sudoku-solver-input-group input {
+            width: 60px;
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .sudoku-solver-auto-stats {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+            padding: 5px;
+            background-color: #f0f0f0;
+            border-radius: 3px;
+        }
+
         @keyframes pulse {
             0% { transform: scale(1); }
             50% { transform: scale(1.05); }
             100% { transform: scale(1); }
+        }
+
+        .blink {
+            animation: blink-animation 1s infinite;
+        }
+
+        @keyframes blink-animation {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
         }
     `);
 
@@ -543,6 +606,11 @@
         return container;
     }
 
+    // Función para esperar
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
     // ==============================================
     // INTERFAZ DE USUARIO
     // ==============================================
@@ -564,6 +632,20 @@
             <button id="restoreBtn" class="sudoku-solver-btn" disabled>Restaurar Original</button>
             <button id="newBtn" class="sudoku-solver-btn" >Nuevo</button>
 
+            <div class="sudoku-solver-auto-controls">
+                <div class="sudoku-solver-input-group">
+                    <label for="autoCount">Repeticiones:</label>
+                    <input type="number" id="autoCount" min="1" max="1000" value="100">
+                </div>
+                <div class="sudoku-solver-input-group">
+                    <label for="autoDelay">Delay (ms):</label>
+                    <input type="number" id="autoDelay" min="100" max="10000" value="3000">
+                </div>
+                <button id="autoBtn" class="sudoku-solver-btn purple">Modo Automático</button>
+                <button id="stopBtn" class="sudoku-solver-btn red" disabled>Detener</button>
+                <div id="autoStats" class="sudoku-solver-auto-stats"></div>
+            </div>
+
             <div id="previewArea" style="display: none;">
                 <div style="margin: 10px 0 5px 0; font-size: 13px; font-weight: bold;">Vista previa:</div>
                 <div id="previewContainer"></div>
@@ -579,13 +661,36 @@
         const stepBtn = document.getElementById('stepBtn');
         const restoreBtn = document.getElementById('restoreBtn');
         const newBtn = document.getElementById('newBtn');
+        const autoBtn = document.getElementById('autoBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const autoCountInput = document.getElementById('autoCount');
+        const autoDelayInput = document.getElementById('autoDelay');
         const statusDiv = document.getElementById('sudokuStatus');
         const previewArea = document.getElementById('previewArea');
         const previewContainer = document.getElementById('previewContainer');
         const statsContainer = document.getElementById('statsContainer');
+        const autoStatsDiv = document.getElementById('autoStats');
 
         let originalBoard = null;
         let solvedBoard = null;
+        let autoModeActive = false;
+        let currentIteration = 0;
+        let totalIterations = 0;
+        let autoModeTimer = null;
+        let totalSolved = 0;
+        let totalErrors = 0;
+        let totalTime = 0;
+
+        // Función para actualizar estadísticas automáticas
+        function updateAutoStats() {
+            autoStatsDiv.innerHTML = `
+                <strong>Estadísticas Auto:</strong><br>
+                Iteración: ${currentIteration}/${totalIterations}<br>
+                Resueltos: ${totalSolved}<br>
+                Errores: ${totalErrors}<br>
+                Tiempo total: ${totalTime.toFixed(2)} ms
+            `;
+        }
 
         // Función para actualizar estadísticas
         function updateStats(stats) {
@@ -606,6 +711,134 @@
         function updateStatus(message, type = 'info') {
             statusDiv.textContent = message;
             statusDiv.className = `sudoku-solver-status sudoku-solver-${type}`;
+        }
+
+        // Función para iniciar modo automático
+        async function startAutoMode() {
+            if (autoModeActive) return;
+            
+            totalIterations = parseInt(autoCountInput.value) || 100;
+            const delay = parseInt(autoDelayInput.value) || 3000;
+            
+            if (totalIterations < 1) {
+                updateStatus("El número de repeticiones debe ser al menos 1.", "error");
+                return;
+            }
+            
+            autoModeActive = true;
+            currentIteration = 0;
+            totalSolved = 0;
+            totalErrors = 0;
+            totalTime = 0;
+            
+            // Deshabilitar botones normales
+            extractBtn.disabled = true;
+            solveBtn.disabled = true;
+            stepBtn.disabled = true;
+            restoreBtn.disabled = true;
+            newBtn.disabled = true;
+            autoBtn.disabled = true;
+            stopBtn.disabled = false;
+            autoCountInput.disabled = true;
+            autoDelayInput.disabled = true;
+            
+            autoBtn.textContent = "Ejecutando...";
+            autoBtn.classList.add('blink');
+            
+            updateStatus(`Iniciando modo automático para ${totalIterations} sudokus...`, "info");
+            
+            for (currentIteration = 1; currentIteration <= totalIterations; currentIteration++) {
+                if (!autoModeActive) break;
+                
+                updateStatus(`[${currentIteration}/${totalIterations}] Procesando sudoku...`, "info");
+                updateAutoStats();
+                
+                try {
+                    // Paso 1: Extraer sudoku
+                    originalBoard = extractSudoku();
+                    
+                    // Paso 2: Resolver
+                    const solver = new SudokuSolver();
+                    const result = solver.solve(originalBoard);
+                    
+                    if (result.solved) {
+                        solvedBoard = result.solution;
+                        displaySolution(originalBoard, solvedBoard);
+                        totalSolved++;
+                        totalTime += result.time;
+                        
+                        updateStatus(`[${currentIteration}/${totalIterations}] ¡Resuelto! ${result.steps} pasos en ${result.time.toFixed(2)} ms`, "success");
+                    } else {
+                        totalErrors++;
+                        updateStatus(`[${currentIteration}/${totalIterations}] Error: No se pudo resolver`, "error");
+                    }
+                    
+                    // Actualizar estadísticas automáticas
+                    updateAutoStats();
+                    
+                    // Paso 3: Esperar
+                    if (currentIteration < totalIterations && autoModeActive) {
+                        updateStatus(`[${currentIteration}/${totalIterations}] Esperando ${delay/1000} segundos antes del siguiente...`, "info");
+                        await sleep(delay);
+                    }
+                    
+                    // Paso 4: Nuevo sudoku (excepto en la última iteración)
+                    if (currentIteration < totalIterations && autoModeActive) {
+                        if (typeof sudo_nuevo === 'function') {
+                            sudo_nuevo();
+                            
+                            // Esperar a que cargue el nuevo sudoku
+                            await sleep(1000);
+                        } else {
+                            updateStatus("Función 'sudo_nuevo' no encontrada", "error");
+                            stopAutoMode();
+                            break;
+                        }
+                    }
+                    
+                } catch (error) {
+                    totalErrors++;
+                    console.error(`Error en iteración ${currentIteration}:`, error);
+                    updateStatus(`[${currentIteration}/${totalIterations}] Error: ${error.message}`, "error");
+                    
+                    if (currentIteration < totalIterations && autoModeActive) {
+                        await sleep(2000);
+                        if (typeof sudo_nuevo === 'function') {
+                            sudo_nuevo();
+                            await sleep(1000);
+                        }
+                    }
+                }
+            }
+            
+            stopAutoMode();
+            
+            if (autoModeActive) {
+                updateStatus(`Modo automático completado: ${totalSolved}/${totalIterations} resueltos, ${totalErrors} errores`, "success");
+            } else {
+                updateStatus(`Modo automático detenido: ${totalSolved}/${currentIteration-1} resueltos, ${totalErrors} errores`, "info");
+            }
+        }
+        
+        // Función para detener modo automático
+        function stopAutoMode() {
+            autoModeActive = false;
+            
+            // Rehabilitar botones
+            extractBtn.disabled = false;
+            solveBtn.disabled = originalBoard === null;
+            stepBtn.disabled = originalBoard === null;
+            restoreBtn.disabled = originalBoard === null || solvedBoard === null;
+            newBtn.disabled = false;
+            autoBtn.disabled = false;
+            stopBtn.disabled = true;
+            autoCountInput.disabled = false;
+            autoDelayInput.disabled = false;
+            
+            autoBtn.textContent = "Modo Automático";
+            autoBtn.classList.remove('blink');
+            
+            updateAutoStats();
         }
 
         // Extraer sudoku de la página
@@ -765,7 +998,23 @@
 
         // Nuevo sudoku (recargar página)
         newBtn.addEventListener('click', function() {
-            sudo_nuevo();
+            if (typeof sudo_nuevo === 'function') {
+                sudo_nuevo();
+                updateStatus("Cargando nuevo sudoku...", "info");
+            }
+        });
+
+        // Modo automático
+        autoBtn.addEventListener('click', function() {
+            if (!autoModeActive) {
+                startAutoMode();
+            }
+        });
+
+        // Detener modo automático
+        stopBtn.addEventListener('click', function() {
+            stopAutoMode();
+            updateStatus("Modo automático detenido por el usuario.", "info");
         });
     }
 
