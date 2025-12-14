@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Solucionador de Sudoku con Backtracking
 // @namespace    http://tampermonkey.net/
-// @version      4.1
-// @description  Extrae y resuelve sudokus en sudoku-online.org usando backtracking eficiente
+// @version      4.3
+// @description  Extrae y resuelve sudokus en sudoku-online.org usando backtracking eficiente con animación opcional
 // @author       Asistente de Código
 // @match *://*.sudoku-online.org/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=sudoku-online.org
@@ -24,8 +24,10 @@
             padding: 15px;
             z-index: 10000;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            width: 320px;
+            width: 500px;
             font-family: Arial, sans-serif;
+            max-height: 95vh;
+            overflow-y: auto;
         }
 
         .sudoku-solver-title {
@@ -35,6 +37,7 @@
             border-bottom: 1px solid #eee;
             padding-bottom: 8px;
             font-size: 16px;
+            text-align: center;
         }
 
         .sudoku-solver-btn {
@@ -44,10 +47,11 @@
             padding: 10px 15px;
             border-radius: 4px;
             cursor: pointer;
-            margin: 5px 0;
-            width: 100%;
+            margin: 5px;
             font-size: 14px;
             transition: background 0.3s;
+            flex: 1;
+            min-width: 120px;
         }
 
         .sudoku-solver-btn:hover {
@@ -162,7 +166,8 @@
             animation: pulse 0.5s;
         }
 
-        .sudoku-solver-auto-controls {
+        .sudoku-solver-auto-controls,
+        .sudoku-solver-animation-controls {
             margin: 10px 0;
             padding: 10px;
             background-color: #f9f9f9;
@@ -174,20 +179,27 @@
             display: flex;
             align-items: center;
             margin-bottom: 8px;
+            justify-content: space-between;
         }
 
         .sudoku-solver-input-group label {
-            flex: 1;
             font-size: 13px;
             color: #666;
+            flex: 1;
+            margin-right: 10px;
         }
 
-        .sudoku-solver-input-group input {
+        .sudoku-solver-input-group input[type="number"],
+        .sudoku-solver-input-group input[type="checkbox"] {
             width: 60px;
             padding: 4px 8px;
             border: 1px solid #ddd;
             border-radius: 4px;
             text-align: center;
+        }
+
+        .sudoku-solver-input-group input[type="checkbox"] {
+            width: auto;
         }
 
         .sudoku-solver-auto-stats {
@@ -197,6 +209,28 @@
             padding: 5px;
             background-color: #f0f0f0;
             border-radius: 3px;
+        }
+
+        .sudoku-solver-animation-option {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            justify-content: space-between;
+        }
+
+        .sudoku-solver-animation-option label {
+            font-size: 13px;
+            color: #333;
+            flex: 1;
+        }
+
+        .sudoku-solver-cell.animating {
+            animation: fill-cell 0.5s ease-in-out;
+        }
+        
+        @keyframes fill-cell {
+            0% { transform: scale(0.8); opacity: 0.5; background-color: #e8f5e9; }
+            100% { transform: scale(1); opacity: 1; }
         }
 
         @keyframes pulse {
@@ -214,10 +248,68 @@
             50% { opacity: 0.5; }
             100% { opacity: 1; }
         }
+
+        /* Nuevos estilos para dos columnas */
+        .sudoku-solver-buttons-row {
+            display: flex;
+            flex-wrap: wrap;
+            margin: 10px 0;
+            gap: 5px;
+        }
+
+        .sudoku-solver-buttons-row .sudoku-solver-btn {
+            flex: 1 1 calc(50% - 10px);
+            margin: 5px;
+        }
+
+        .sudoku-solver-controls-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 10px 0;
+        }
+
+        .sudoku-solver-section {
+            margin-bottom: 15px;
+        }
+
+        .sudoku-solver-section-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .sudoku-solver-preview-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+
+        /* Scrollbar personalizada */
+        .sudoku-solver-panel::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .sudoku-solver-panel::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        .sudoku-solver-panel::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+
+        .sudoku-solver-panel::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
     `);
 
     // ==============================================
-    // ALGORITMO DE BACKTRACKING SEGÚN TU CÓDIGO
+    // ALGORITMO DE BACKTRACKING
     // ==============================================
 
     class SudokuSolver {
@@ -227,7 +319,6 @@
             this.maxDepth = 0;
         }
 
-        // Encontrar la siguiente celda vacía
         nextEmptySpot(board) {
             for (let i = 0; i < 9; i++) {
                 for (let j = 0; j < 9; j++) {
@@ -236,10 +327,9 @@
                     }
                 }
             }
-            return [-1, -1]; // No hay celdas vacías
+            return [-1, -1];
         }
 
-        // Verificar si un valor es válido en una fila
         checkRow(board, row, value) {
             for (let i = 0; i < 9; i++) {
                 if (board[row][i] === value) {
@@ -249,7 +339,6 @@
             return true;
         }
 
-        // Verificar si un valor es válido en una columna
         checkColumn(board, column, value) {
             for (let i = 0; i < 9; i++) {
                 if (board[i][column] === value) {
@@ -259,7 +348,6 @@
             return true;
         }
 
-        // Verificar si un valor es válido en el cuadrado 3x3
         checkSquare(board, row, column, value) {
             const boxRow = Math.floor(row / 3) * 3;
             const boxCol = Math.floor(column / 3) * 3;
@@ -274,19 +362,16 @@
             return true;
         }
 
-        // Combinar todas las verificaciones
         checkValue(board, row, column, value) {
             return this.checkRow(board, row, value) &&
                    this.checkColumn(board, column, value) &&
                    this.checkSquare(board, row, column, value);
         }
 
-        // Función principal de resolución con backtracking
         solve(board) {
             this.steps = 0;
             this.startTime = performance.now();
 
-            // Función recursiva interna
             const solveRecursive = (board) => {
                 this.steps++;
 
@@ -294,26 +379,21 @@
                 let row = emptySpot[0];
                 let col = emptySpot[1];
 
-                // Si no hay más celdas vacías, hemos terminado
                 if (row === -1) {
                     return true;
                 }
 
-                // Intentar números del 1 al 9
                 for (let num = 1; num <= 9; num++) {
                     if (this.checkValue(board, row, col, num)) {
                         board[row][col] = num;
 
-                        // Actualizar profundidad máxima
                         const filled = this.countFilledCells(board);
                         this.maxDepth = Math.max(this.maxDepth, filled);
 
-                        // Continuar recursivamente
                         if (solveRecursive(board)) {
                             return true;
                         }
 
-                        // Si llegamos aquí, retroceder
                         board[row][col] = 0;
                     }
                 }
@@ -321,7 +401,6 @@
                 return false;
             };
 
-            // Hacer una copia del tablero para no modificar el original
             const boardCopy = JSON.parse(JSON.stringify(board));
             const solved = solveRecursive(boardCopy);
 
@@ -336,20 +415,16 @@
             };
         }
 
-        // Versión paso a paso para visualización
         async solveStepByStep(board, callback = null) {
             this.steps = 0;
             this.startTime = performance.now();
             this.maxDepth = 0;
 
-            // Hacer una copia del tablero
             const boardCopy = JSON.parse(JSON.stringify(board));
 
-            // Función recursiva paso a paso
             const solveRecursiveStep = async (board) => {
                 this.steps++;
 
-                // Llamar al callback cada 50 pasos para no saturar
                 if (callback && this.steps % 50 === 0) {
                     await callback(board, this.steps);
                 }
@@ -366,7 +441,6 @@
                     if (this.checkValue(board, row, col, num)) {
                         board[row][col] = num;
 
-                        // Actualizar profundidad
                         const filled = this.countFilledCells(board);
                         this.maxDepth = Math.max(this.maxDepth, filled);
 
@@ -393,7 +467,6 @@
             };
         }
 
-        // Contar celdas llenas
         countFilledCells(board) {
             let count = 0;
             for (let i = 0; i < 9; i++) {
@@ -408,62 +481,73 @@
     }
 
     // ==============================================
+    // FUNCIONES AUXILIARES
+    // ==============================================
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function randomSleep(min, max) {
+        return new Promise(resolve => 
+            setTimeout(resolve, Math.random() * (max - min) + min)
+        );
+    }
+
+    function shuffleArray(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
+        return array;
+    }
+
+    // ==============================================
     // FUNCIONES PARA INTERACTUAR CON LA PÁGINA WEB
     // ==============================================
 
-    // Extraer el sudoku de la página
     function extractSudoku() {
         const sudokuGrid = [];
 
-        // Inicializar la grilla 9x9 con ceros
         for (let i = 0; i < 9; i++) {
             sudokuGrid[i] = Array(9).fill(0);
         }
 
-        // Buscar elementos del sudoku
         const sudokuElements = document.querySelectorAll('[id^="sudo_input_"], div[class*="sudo_field"]');
 
         if (sudokuElements.length === 0) {
             throw new Error("No se encontraron elementos del sudoku. ¿Estás en la página correcta?");
         }
 
-        // Llenar la grilla con los valores encontrados
         sudokuElements.forEach(element => {
-            // Obtener coordenadas
             let row, col;
 
-            // Intentar obtener de data-x y data-y
             if (element.hasAttribute('data-x') && element.hasAttribute('data-y')) {
                 row = parseInt(element.getAttribute('data-x'));
                 col = parseInt(element.getAttribute('data-y'));
             }
-            // Intentar obtener del id
             else if (element.id && element.id.startsWith('sudo_input_')) {
                 const index = parseInt(element.id.replace('sudo_input_', ''));
                 row = Math.floor(index / 9);
                 col = index % 9;
             }
-            // Intentar obtener de data-index
             else if (element.hasAttribute('data-index')) {
                 const index = parseInt(element.getAttribute('data-index'));
                 row = Math.floor(index / 9);
                 col = index % 9;
             }
 
-            // Obtener el valor
             let value = 0;
             const textContent = element.textContent.trim();
             if (textContent && !isNaN(textContent) && textContent !== '') {
                 value = parseInt(textContent, 10);
             }
 
-            // Asignar a la grilla si tenemos coordenadas válidas
             if (row !== undefined && col !== undefined && row >= 0 && row < 9 && col >= 0 && col < 9) {
                 sudokuGrid[row][col] = value;
             }
         });
 
-        // Validar que extrajimos algo
         let filledCells = 0;
         for (let i = 0; i < 9; i++) {
             for (let j = 0; j < 9; j++) {
@@ -484,14 +568,12 @@
         return sudokuGrid;
     }
 
-    // Mostrar solución en la página
     function displaySolution(originalGrid, solvedGrid) {
         const sudokuElements = document.querySelectorAll('[id^="sudo_input_"], div[class*="sudo_field"]');
 
         sudokuElements.forEach(element => {
             let row, col;
 
-            // Obtener coordenadas del elemento
             if (element.hasAttribute('data-x') && element.hasAttribute('data-y')) {
                 row = parseInt(element.getAttribute('data-x'));
                 col = parseInt(element.getAttribute('data-y'));
@@ -505,25 +587,72 @@
                 col = index % 9;
             }
 
-            // Si tenemos coordenadas válidas
             if (row !== undefined && col !== undefined) {
                 const originalValue = originalGrid[row][col];
                 const solvedValue = solvedGrid[row][col];
 
-                // Solo actualizar si estaba vacío o diferente
                 if (originalValue === 0 || originalValue !== solvedValue) {
                     element.textContent = solvedValue;
                     element.style.color = '#4CAF50';
                     element.style.fontWeight = 'bold';
-
-                    // Agregar clase para resaltar
                     element.classList.add('sudoku-solved');
                 }
             }
         });
     }
 
-    // Restaurar sudoku original
+    async function displaySolutionWithAnimation(originalGrid, solvedGrid, minDelay = 50, maxDelay = 200) {
+        const sudokuElements = document.querySelectorAll('[id^="sudo_input_"], div[class*="sudo_field"]');
+        
+        const cellsToUpdate = [];
+        
+        sudokuElements.forEach(element => {
+            let row, col;
+
+            if (element.hasAttribute('data-x') && element.hasAttribute('data-y')) {
+                row = parseInt(element.getAttribute('data-x'));
+                col = parseInt(element.getAttribute('data-y'));
+            } else if (element.id && element.id.startsWith('sudo_input_')) {
+                const index = parseInt(element.id.replace('sudo_input_', ''));
+                row = Math.floor(index / 9);
+                col = index % 9;
+            } else if (element.hasAttribute('data-index')) {
+                const index = parseInt(element.getAttribute('data-index'));
+                row = Math.floor(index / 9);
+                col = index % 9;
+            }
+
+            if (row !== undefined && col !== undefined) {
+                const originalValue = originalGrid[row][col];
+                const solvedValue = solvedGrid[row][col];
+
+                if (originalValue === 0 || originalValue !== solvedValue) {
+                    cellsToUpdate.push({
+                        element: element,
+                        solvedValue: solvedValue,
+                        row: row,
+                        col: col
+                    });
+                }
+            }
+        });
+        
+        shuffleArray(cellsToUpdate);
+        
+        for (const cell of cellsToUpdate) {
+            await randomSleep(minDelay, maxDelay);
+            
+            cell.element.textContent = cell.solvedValue;
+            cell.element.style.color = '#4CAF50';
+            cell.element.style.fontWeight = 'bold';
+            cell.element.classList.add('sudoku-solved', 'animating');
+            
+            setTimeout(() => {
+                cell.element.classList.remove('animating');
+            }, 500);
+        }
+    }
+
     function restoreOriginal(originalGrid) {
         const sudokuElements = document.querySelectorAll('[id^="sudo_input_"], div[class*="sudo_field"]');
 
@@ -559,7 +688,6 @@
         });
     }
 
-    // Imprimir tablero en consola
     function printBoardToConsole(board, title) {
         console.log(`\n${title}:`);
         console.log("+-------+-------+-------+");
@@ -582,7 +710,6 @@
         console.log("+-------+-------+-------+");
     }
 
-    // Crear vista previa del tablero
     function createPreview(grid, isOriginal = false) {
         const container = document.createElement('div');
         container.className = 'sudoku-solver-grid';
@@ -606,17 +733,11 @@
         return container;
     }
 
-    // Función para esperar
-    function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
     // ==============================================
     // INTERFAZ DE USUARIO
     // ==============================================
 
     function createUI() {
-        // Crear panel principal
         const panel = document.createElement('div');
         panel.className = 'sudoku-solver-panel';
         panel.innerHTML = `
@@ -626,36 +747,73 @@
                 Listo para resolver. Primero haz clic en "Extraer Sudoku".
             </div>
 
-            <button id="extractBtn" class="sudoku-solver-btn">Extraer Sudoku</button>
-            <button id="solveBtn" class="sudoku-solver-btn blue" disabled>Resolver</button>
-            <button id="stepBtn" class="sudoku-solver-btn orange" disabled>Paso a Paso</button>
-            <button id="restoreBtn" class="sudoku-solver-btn" disabled>Restaurar Original</button>
-            <button id="newBtn" class="sudoku-solver-btn" >Nuevo</button>
-
-            <div class="sudoku-solver-auto-controls">
-                <div class="sudoku-solver-input-group">
-                    <label for="autoCount">Repeticiones:</label>
-                    <input type="number" id="autoCount" min="1" max="1000" value="100">
+            <div class="sudoku-solver-section">
+                <div class="sudoku-solver-section-title">Controles Principales</div>
+                <div class="sudoku-solver-buttons-row">
+                    <button id="extractBtn" class="sudoku-solver-btn">Extraer Sudoku</button>
+                    <button id="solveBtn" class="sudoku-solver-btn blue" disabled>Resolver</button>
+                    <button id="stepBtn" class="sudoku-solver-btn orange" disabled>Paso a Paso</button>
+                    <button id="restoreBtn" class="sudoku-solver-btn" disabled>Restaurar</button>
+                    <button id="newBtn" class="sudoku-solver-btn">Nuevo</button>
                 </div>
-                <div class="sudoku-solver-input-group">
-                    <label for="autoDelay">Delay (ms):</label>
-                    <input type="number" id="autoDelay" min="100" max="10000" value="3000">
-                </div>
-                <button id="autoBtn" class="sudoku-solver-btn purple">Modo Automático</button>
-                <button id="stopBtn" class="sudoku-solver-btn red" disabled>Detener</button>
-                <div id="autoStats" class="sudoku-solver-auto-stats"></div>
             </div>
 
-            <div id="previewArea" style="display: none;">
-                <div style="margin: 10px 0 5px 0; font-size: 13px; font-weight: bold;">Vista previa:</div>
-                <div id="previewContainer"></div>
-                <div id="statsContainer" class="sudoku-solver-stats"></div>
+            <div class="sudoku-solver-controls-grid">
+                <div class="sudoku-solver-section">
+                    <div class="sudoku-solver-section-title">Animación</div>
+                    <div class="sudoku-solver-animation-controls">
+                        <div class="sudoku-solver-animation-option">
+                            <label for="animationCheckbox">Usar animación:</label>
+                            <input type="checkbox" id="animationCheckbox">
+                        </div>
+                        <div id="animationSettings">
+                            <div class="sudoku-solver-input-group">
+                                <label for="animMinDelay">Mín (ms):</label>
+                                <input type="number" id="animMinDelay" min="0" max="1000" value="50">
+                            </div>
+                            <div class="sudoku-solver-input-group">
+                                <label for="animMaxDelay">Máx (ms):</label>
+                                <input type="number" id="animMaxDelay" min="0" max="2000" value="200">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sudoku-solver-section">
+                    <div class="sudoku-solver-section-title">Automático</div>
+                    <div class="sudoku-solver-auto-controls">
+                        <div class="sudoku-solver-input-group">
+                            <label for="autoCount">Repeticiones:</label>
+                            <input type="number" id="autoCount" min="1" max="1000" value="100">
+                        </div>
+                        <div class="sudoku-solver-input-group">
+                            <label for="autoDelay">Delay (ms):</label>
+                            <input type="number" id="autoDelay" min="100" max="10000" value="3000">
+                        </div>
+                        <div class="sudoku-solver-input-group">
+                            <label for="autoAnimation">Usar animación:</label>
+                            <input type="checkbox" id="autoAnimation">
+                        </div>
+                        <div class="sudoku-solver-buttons-row">
+                            <button id="autoBtn" class="sudoku-solver-btn purple">Auto</button>
+                            <button id="stopBtn" class="sudoku-solver-btn red" disabled>Detener</button>
+                        </div>
+                        <div id="autoStats" class="sudoku-solver-auto-stats"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sudoku-solver-preview-section">
+                <div id="previewArea" style="display: none;">
+                    <div class="sudoku-solver-section-title">Vista Previa</div>
+                    <div id="previewContainer"></div>
+                    <div id="statsContainer" class="sudoku-solver-stats"></div>
+                </div>
             </div>
         `;
 
         document.body.appendChild(panel);
 
-        // Referencias a elementos
         const extractBtn = document.getElementById('extractBtn');
         const solveBtn = document.getElementById('solveBtn');
         const stepBtn = document.getElementById('stepBtn');
@@ -663,8 +821,13 @@
         const newBtn = document.getElementById('newBtn');
         const autoBtn = document.getElementById('autoBtn');
         const stopBtn = document.getElementById('stopBtn');
+        const animationCheckbox = document.getElementById('animationCheckbox');
+        const animationSettings = document.getElementById('animationSettings');
+        const autoAnimationCheckbox = document.getElementById('autoAnimation');
         const autoCountInput = document.getElementById('autoCount');
         const autoDelayInput = document.getElementById('autoDelay');
+        const animMinDelayInput = document.getElementById('animMinDelay');
+        const animMaxDelayInput = document.getElementById('animMaxDelay');
         const statusDiv = document.getElementById('sudokuStatus');
         const previewArea = document.getElementById('previewArea');
         const previewContainer = document.getElementById('previewContainer');
@@ -676,12 +839,15 @@
         let autoModeActive = false;
         let currentIteration = 0;
         let totalIterations = 0;
-        let autoModeTimer = null;
         let totalSolved = 0;
         let totalErrors = 0;
         let totalTime = 0;
 
-        // Función para actualizar estadísticas automáticas
+        // Mostrar/ocultar configuración de animación
+        animationCheckbox.addEventListener('change', function() {
+            animationSettings.style.display = this.checked ? 'block' : 'none';
+        });
+
         function updateAutoStats() {
             autoStatsDiv.innerHTML = `
                 <strong>Estadísticas Auto:</strong><br>
@@ -692,7 +858,6 @@
             `;
         }
 
-        // Función para actualizar estadísticas
         function updateStats(stats) {
             if (!stats) {
                 statsContainer.innerHTML = '';
@@ -707,18 +872,19 @@
             `;
         }
 
-        // Función para actualizar estado
         function updateStatus(message, type = 'info') {
             statusDiv.textContent = message;
             statusDiv.className = `sudoku-solver-status sudoku-solver-${type}`;
         }
 
-        // Función para iniciar modo automático
         async function startAutoMode() {
             if (autoModeActive) return;
             
             totalIterations = parseInt(autoCountInput.value) || 100;
             const delay = parseInt(autoDelayInput.value) || 3000;
+            const useAnimation = autoAnimationCheckbox.checked;
+            const animMinDelay = parseInt(animMinDelayInput.value) || 50;
+            const animMaxDelay = parseInt(animMaxDelayInput.value) || 200;
             
             if (totalIterations < 1) {
                 updateStatus("El número de repeticiones debe ser al menos 1.", "error");
@@ -731,7 +897,6 @@
             totalErrors = 0;
             totalTime = 0;
             
-            // Deshabilitar botones normales
             extractBtn.disabled = true;
             solveBtn.disabled = true;
             stepBtn.disabled = true;
@@ -741,6 +906,7 @@
             stopBtn.disabled = false;
             autoCountInput.disabled = true;
             autoDelayInput.disabled = true;
+            autoAnimationCheckbox.disabled = true;
             
             autoBtn.textContent = "Ejecutando...";
             autoBtn.classList.add('blink');
@@ -754,16 +920,20 @@
                 updateAutoStats();
                 
                 try {
-                    // Paso 1: Extraer sudoku
                     originalBoard = extractSudoku();
                     
-                    // Paso 2: Resolver
                     const solver = new SudokuSolver();
                     const result = solver.solve(originalBoard);
                     
                     if (result.solved) {
                         solvedBoard = result.solution;
-                        displaySolution(originalBoard, solvedBoard);
+                        
+                        if (useAnimation) {
+                            await displaySolutionWithAnimation(originalBoard, solvedBoard, animMinDelay, animMaxDelay);
+                        } else {
+                            displaySolution(originalBoard, solvedBoard);
+                        }
+                        
                         totalSolved++;
                         totalTime += result.time;
                         
@@ -773,21 +943,16 @@
                         updateStatus(`[${currentIteration}/${totalIterations}] Error: No se pudo resolver`, "error");
                     }
                     
-                    // Actualizar estadísticas automáticas
                     updateAutoStats();
                     
-                    // Paso 3: Esperar
                     if (currentIteration < totalIterations && autoModeActive) {
                         updateStatus(`[${currentIteration}/${totalIterations}] Esperando ${delay/1000} segundos antes del siguiente...`, "info");
                         await sleep(delay);
                     }
                     
-                    // Paso 4: Nuevo sudoku (excepto en la última iteración)
                     if (currentIteration < totalIterations && autoModeActive) {
                         if (typeof sudo_nuevo === 'function') {
                             sudo_nuevo();
-                            
-                            // Esperar a que cargue el nuevo sudoku
                             await sleep(1000);
                         } else {
                             updateStatus("Función 'sudo_nuevo' no encontrada", "error");
@@ -820,11 +985,9 @@
             }
         }
         
-        // Función para detener modo automático
         function stopAutoMode() {
             autoModeActive = false;
             
-            // Rehabilitar botones
             extractBtn.disabled = false;
             solveBtn.disabled = originalBoard === null;
             stepBtn.disabled = originalBoard === null;
@@ -834,14 +997,14 @@
             stopBtn.disabled = true;
             autoCountInput.disabled = false;
             autoDelayInput.disabled = false;
+            autoAnimationCheckbox.disabled = false;
             
-            autoBtn.textContent = "Modo Automático";
+            autoBtn.textContent = "Auto";
             autoBtn.classList.remove('blink');
             
             updateAutoStats();
         }
 
-        // Extraer sudoku de la página
         extractBtn.addEventListener('click', function() {
             try {
                 updateStatus("Extrayendo sudoku de la página...", "info");
@@ -849,12 +1012,10 @@
                 originalBoard = extractSudoku();
                 printBoardToConsole(originalBoard, "Sudoku Original");
 
-                // Mostrar vista previa
                 previewContainer.innerHTML = '';
                 previewContainer.appendChild(createPreview(originalBoard, true));
                 previewArea.style.display = 'block';
 
-                // Habilitar botones
                 solveBtn.disabled = false;
                 stepBtn.disabled = false;
 
@@ -866,8 +1027,7 @@
             }
         });
 
-        // Resolver sudoku
-        solveBtn.addEventListener('click', function() {
+        solveBtn.addEventListener('click', async function() {
             if (!originalBoard) {
                 updateStatus("Primero extrae el sudoku.", "error");
                 return;
@@ -880,8 +1040,7 @@
 
             updateStatus("Resolviendo sudoku con backtracking...", "info");
 
-            // Resolver en un setTimeout para no bloquear la UI
-            setTimeout(() => {
+            setTimeout(async () => {
                 try {
                     const solver = new SudokuSolver();
                     const result = solver.solve(originalBoard);
@@ -891,19 +1050,21 @@
 
                         printBoardToConsole(solvedBoard, "Sudoku Resuelto");
 
-                        // Mostrar solución en la página
-                        displaySolution(originalBoard, solvedBoard);
+                        if (animationCheckbox.checked) {
+                            const animMinDelay = parseInt(animMinDelayInput.value) || 50;
+                            const animMaxDelay = parseInt(animMaxDelayInput.value) || 200;
+                            await displaySolutionWithAnimation(originalBoard, solvedBoard, animMinDelay, animMaxDelay);
+                        } else {
+                            displaySolution(originalBoard, solvedBoard);
+                        }
 
-                        // Actualizar vista previa
                         previewContainer.innerHTML = '';
                         previewContainer.appendChild(createPreview(solvedBoard));
 
-                        // Mostrar estadísticas
                         updateStats(result);
 
                         updateStatus(`¡Sudoku resuelto! ${result.steps} pasos en ${result.time.toFixed(2)} ms`, "success");
 
-                        // Habilitar botón de restaurar
                         restoreBtn.disabled = false;
 
                         console.log("Sudoku resuelto exitosamente.");
@@ -922,7 +1083,6 @@
             }, 10);
         });
 
-        // Resolver paso a paso
         stepBtn.addEventListener('click', async function() {
             if (!originalBoard) {
                 updateStatus("Primero extrae el sudoku.", "error");
@@ -943,13 +1103,11 @@
                 const result = await solver.solveStepByStep(originalBoard, async (board, steps) => {
                     stepCount = steps;
 
-                    // Actualizar vista previa cada 200 pasos
                     if (steps % 200 === 0) {
                         previewContainer.innerHTML = '';
                         previewContainer.appendChild(createPreview(board));
                         updateStatus(`Resolviendo... ${steps} pasos`, "info");
 
-                        // Pequeña pausa para visualización
                         await new Promise(resolve => setTimeout(resolve, 10));
                     }
                 });
@@ -957,19 +1115,21 @@
                 if (result.solved) {
                     solvedBoard = result.solution;
 
-                    // Mostrar solución final en la página
-                    displaySolution(originalBoard, solvedBoard);
+                    if (animationCheckbox.checked) {
+                        const animMinDelay = parseInt(animMinDelayInput.value) || 50;
+                        const animMaxDelay = parseInt(animMaxDelayInput.value) || 200;
+                        await displaySolutionWithAnimation(originalBoard, solvedBoard, animMinDelay, animMaxDelay);
+                    } else {
+                        displaySolution(originalBoard, solvedBoard);
+                    }
 
-                    // Mostrar vista previa final
                     previewContainer.innerHTML = '';
                     previewContainer.appendChild(createPreview(solvedBoard));
 
-                    // Mostrar estadísticas
                     updateStats(result);
 
                     updateStatus(`¡Sudoku resuelto paso a paso! ${result.steps} pasos en ${result.time.toFixed(2)} ms`, "success");
 
-                    // Habilitar botón de restaurar
                     restoreBtn.disabled = false;
                 } else {
                     updateStatus("No se pudo resolver el sudoku.", "error");
@@ -985,7 +1145,6 @@
             }
         });
 
-        // Restaurar original
         restoreBtn.addEventListener('click', function() {
             if (originalBoard) {
                 restoreOriginal(originalBoard);
@@ -996,7 +1155,6 @@
             }
         });
 
-        // Nuevo sudoku (recargar página)
         newBtn.addEventListener('click', function() {
             if (typeof sudo_nuevo === 'function') {
                 sudo_nuevo();
@@ -1004,14 +1162,12 @@
             }
         });
 
-        // Modo automático
         autoBtn.addEventListener('click', function() {
             if (!autoModeActive) {
                 startAutoMode();
             }
         });
 
-        // Detener modo automático
         stopBtn.addEventListener('click', function() {
             stopAutoMode();
             updateStatus("Modo automático detenido por el usuario.", "info");
@@ -1023,21 +1179,17 @@
     // ==============================================
 
     function init() {
-        // Esperar a que la página cargue
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', createUI);
         } else {
-            // Si ya está cargada, crear la UI directamente
             setTimeout(createUI, 1000);
         }
 
-        // También escuchar cambios en la URL (por si cambian de sudoku)
         let lastUrl = location.href;
         new MutationObserver(() => {
             const url = location.href;
             if (url !== lastUrl) {
                 lastUrl = url;
-                // Si ya existe el panel, eliminarlo y recrearlo
                 const existingPanel = document.querySelector('.sudoku-solver-panel');
                 if (existingPanel) {
                     existingPanel.remove();
@@ -1047,6 +1199,5 @@
         }).observe(document, {subtree: true, childList: true});
     }
 
-    // Iniciar
     init();
 })();
