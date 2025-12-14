@@ -3,4 +3,5 @@ pytesseract
 numpy
 pyautogui
 selenium
-
+fastapi
+uvicorn
