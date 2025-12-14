@@ -1,18 +1,19 @@
 // ==UserScript==
-// @name         Solucionador de Sudoku con Backtracking
+// @name         Solucionador de Sudoku con Backtracking y API
 // @namespace    http://tampermonkey.net/
-// @version      4.3
-// @description  Extrae y resuelve sudokus en sudoku-online.org usando backtracking eficiente con animación opcional
+// @version      5.0
+// @description  Extrae y resuelve sudokus usando backtracking local o API externa con animación opcional
 // @author       Asistente de Código
 // @match *://*.sudoku-online.org/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=sudoku-online.org
 // @grant        GM_addStyle
+// @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    // Agregar estilos CSS
+    // Agregar estilos CSS (se mantienen iguales)
     GM_addStyle(`
         .sudoku-solver-panel {
             position: fixed;
@@ -24,7 +25,7 @@
             padding: 15px;
             z-index: 10000;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            width: 500px;
+            width: 520px;
             font-family: Arial, sans-serif;
             max-height: 95vh;
             overflow-y: auto;
@@ -167,7 +168,8 @@
         }
 
         .sudoku-solver-auto-controls,
-        .sudoku-solver-animation-controls {
+        .sudoku-solver-animation-controls,
+        .sudoku-solver-api-controls {
             margin: 10px 0;
             padding: 10px;
             background-color: #f9f9f9;
@@ -190,6 +192,7 @@
         }
 
         .sudoku-solver-input-group input[type="number"],
+        .sudoku-solver-input-group input[type="text"],
         .sudoku-solver-input-group input[type="checkbox"] {
             width: 60px;
             padding: 4px 8px;
@@ -200,6 +203,10 @@
 
         .sudoku-solver-input-group input[type="checkbox"] {
             width: auto;
+        }
+
+        .sudoku-solver-input-group input[type="text"] {
+            width: 200px;
         }
 
         .sudoku-solver-auto-stats {
@@ -288,6 +295,27 @@
             border-top: 1px solid #eee;
         }
 
+        /* Radio button styles */
+        .sudoku-solver-radio-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            gap: 15px;
+        }
+
+        .sudoku-solver-radio-group label {
+            display: flex;
+            align-items: center;
+            font-size: 13px;
+            color: #666;
+            cursor: pointer;
+        }
+
+        .sudoku-solver-radio-group input[type="radio"] {
+            margin-right: 5px;
+            cursor: pointer;
+        }
+
         /* Scrollbar personalizada */
         .sudoku-solver-panel::-webkit-scrollbar {
             width: 8px;
@@ -309,7 +337,7 @@
     `);
 
     // ==============================================
-    // ALGORITMO DE BACKTRACKING
+    // ALGORITMO DE BACKTRACKING LOCAL
     // ==============================================
 
     class SudokuSolver {
@@ -411,7 +439,8 @@
                 solution: solved ? boardCopy : null,
                 steps: this.steps,
                 time: endTime - this.startTime,
-                maxDepth: this.maxDepth
+                maxDepth: this.maxDepth,
+                method: "backtracking_local"
             };
         }
 
@@ -463,7 +492,8 @@
                 solution: solved ? boardCopy : null,
                 steps: this.steps,
                 time: endTime - this.startTime,
-                maxDepth: this.maxDepth
+                maxDepth: this.maxDepth,
+                method: "backtracking_local"
             };
         }
 
@@ -478,6 +508,50 @@
             }
             return count;
         }
+    }
+
+    // ==============================================
+    // FUNCIÓN PARA USAR LA API
+    // ==============================================
+
+    async function solveWithAPI(grid, apiUrl) {
+        const startTime = performance.now();
+        
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `${apiUrl}/solve`,
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                data: JSON.stringify({ grid: grid }),
+                responseType: 'json',
+                timeout: 30000,
+                onload: function(response) {
+                    const endTime = performance.now();
+                    
+                    if (response.status === 200) {
+                        const data = response.response;
+                        resolve({
+                            solved: data.solved,
+                            solution: data.solution,
+                            steps: data.steps || 0,
+                            time: data.time_ms || (endTime - startTime),
+                            message: data.message,
+                            method: data.method || "api"
+                        });
+                    } else {
+                        reject(new Error(`API error ${response.status}: ${response.response?.detail || 'Unknown error'}`));
+                    }
+                },
+                onerror: function(error) {
+                    reject(new Error(`Network error: ${error.statusText || 'Cannot connect to API'}`));
+                },
+                ontimeout: function() {
+                    reject(new Error('API request timeout'));
+                }
+            });
+        });
     }
 
     // ==============================================
@@ -758,6 +832,18 @@
                 </div>
             </div>
 
+            <div class="sudoku-solver-section">
+                <div class="sudoku-solver-section-title">Método de Resolución</div>
+                <div class="sudoku-solver-radio-group">
+                    <label>
+                        <input type="radio" name="solverMethod" value="local" checked> Local (Backtracking)
+                    </label>
+                    <label>
+                        <input type="radio" name="solverMethod" value="api"> API Externa
+                    </label>
+                </div>
+            </div>
+
             <div class="sudoku-solver-controls-grid">
                 <div class="sudoku-solver-section">
                     <div class="sudoku-solver-section-title">Animación</div>
@@ -780,26 +866,40 @@
                 </div>
 
                 <div class="sudoku-solver-section">
-                    <div class="sudoku-solver-section-title">Automático</div>
-                    <div class="sudoku-solver-auto-controls">
+                    <div class="sudoku-solver-section-title">Configuración API</div>
+                    <div class="sudoku-solver-api-controls">
                         <div class="sudoku-solver-input-group">
-                            <label for="autoCount">Repeticiones:</label>
-                            <input type="number" id="autoCount" min="1" max="1000" value="100">
-                        </div>
-                        <div class="sudoku-solver-input-group">
-                            <label for="autoDelay">Delay (ms):</label>
-                            <input type="number" id="autoDelay" min="100" max="10000" value="3000">
+                            <label for="apiUrl">URL API:</label>
+                            <input type="text" id="apiUrl" value="http://127.0.0.1:8888">
                         </div>
                         <div class="sudoku-solver-input-group">
-                            <label for="autoAnimation">Usar animación:</label>
-                            <input type="checkbox" id="autoAnimation">
+                            <label for="apiTimeout">Timeout (ms):</label>
+                            <input type="number" id="apiTimeout" min="1000" max="60000" value="30000">
                         </div>
-                        <div class="sudoku-solver-buttons-row">
-                            <button id="autoBtn" class="sudoku-solver-btn purple">Auto</button>
-                            <button id="stopBtn" class="sudoku-solver-btn red" disabled>Detener</button>
-                        </div>
-                        <div id="autoStats" class="sudoku-solver-auto-stats"></div>
                     </div>
+                </div>
+            </div>
+
+            <div class="sudoku-solver-section">
+                <div class="sudoku-solver-section-title">Automático</div>
+                <div class="sudoku-solver-auto-controls">
+                    <div class="sudoku-solver-input-group">
+                        <label for="autoCount">Repeticiones:</label>
+                        <input type="number" id="autoCount" min="1" max="1000" value="100">
+                    </div>
+                    <div class="sudoku-solver-input-group">
+                        <label for="autoDelay">Delay (ms):</label>
+                        <input type="number" id="autoDelay" min="100" max="10000" value="3000">
+                    </div>
+                    <div class="sudoku-solver-input-group">
+                        <label for="autoAnimation">Usar animación:</label>
+                        <input type="checkbox" id="autoAnimation">
+                    </div>
+                    <div class="sudoku-solver-buttons-row">
+                        <button id="autoBtn" class="sudoku-solver-btn purple">Auto</button>
+                        <button id="stopBtn" class="sudoku-solver-btn red" disabled>Detener</button>
+                    </div>
+                    <div id="autoStats" class="sudoku-solver-auto-stats"></div>
                 </div>
             </div>
 
@@ -828,11 +928,14 @@
         const autoDelayInput = document.getElementById('autoDelay');
         const animMinDelayInput = document.getElementById('animMinDelay');
         const animMaxDelayInput = document.getElementById('animMaxDelay');
+        const apiUrlInput = document.getElementById('apiUrl');
+        const apiTimeoutInput = document.getElementById('apiTimeout');
         const statusDiv = document.getElementById('sudokuStatus');
         const previewArea = document.getElementById('previewArea');
         const previewContainer = document.getElementById('previewContainer');
         const statsContainer = document.getElementById('statsContainer');
         const autoStatsDiv = document.getElementById('autoStats');
+        const solverMethodRadios = document.querySelectorAll('input[name="solverMethod"]');
 
         let originalBoard = null;
         let solvedBoard = null;
@@ -846,6 +949,34 @@
         // Mostrar/ocultar configuración de animación
         animationCheckbox.addEventListener('change', function() {
             animationSettings.style.display = this.checked ? 'block' : 'none';
+        });
+
+        // Actualizar visibilidad de controles según método seleccionado
+        function updateControlsVisibility() {
+            const useAPI = document.querySelector('input[name="solverMethod"]:checked').value === 'api';
+            
+            // Deshabilitar paso a paso si se usa API
+            stepBtn.disabled = useAPI || originalBoard === null;
+            
+            // Mostrar/ocultar configuración de API
+            document.querySelector('.sudoku-solver-api-controls').style.display = useAPI ? 'block' : 'none';
+            
+            // Si es API, deshabilitar animación (puede que la API no la soporte)
+            if (useAPI) {
+                animationCheckbox.checked = false;
+                animationCheckbox.disabled = true;
+                animationSettings.style.display = 'none';
+            } else {
+                animationCheckbox.disabled = false;
+            }
+        }
+
+        // Inicializar visibilidad de controles
+        updateControlsVisibility();
+
+        // Escuchar cambios en el método de resolución
+        solverMethodRadios.forEach(radio => {
+            radio.addEventListener('change', updateControlsVisibility);
         });
 
         function updateAutoStats() {
@@ -866,9 +997,10 @@
 
             statsContainer.innerHTML = `
                 <strong>Estadísticas:</strong><br>
+                Método: ${stats.method || 'Local'}<br>
                 Pasos: ${stats.steps.toLocaleString()}<br>
                 Tiempo: ${stats.time.toFixed(2)} ms<br>
-                Profundidad máxima: ${stats.maxDepth}
+                ${stats.maxDepth ? `Profundidad máxima: ${stats.maxDepth}` : ''}
             `;
         }
 
@@ -880,9 +1012,11 @@
         async function startAutoMode() {
             if (autoModeActive) return;
             
+            const useAPI = document.querySelector('input[name="solverMethod"]:checked').value === 'api';
+            
             totalIterations = parseInt(autoCountInput.value) || 100;
             const delay = parseInt(autoDelayInput.value) || 3000;
-            const useAnimation = autoAnimationCheckbox.checked;
+            const useAnimation = autoAnimationCheckbox.checked && !useAPI;
             const animMinDelay = parseInt(animMinDelayInput.value) || 50;
             const animMaxDelay = parseInt(animMaxDelayInput.value) || 200;
             
@@ -922,8 +1056,15 @@
                 try {
                     originalBoard = extractSudoku();
                     
-                    const solver = new SudokuSolver();
-                    const result = solver.solve(originalBoard);
+                    let result;
+                    
+                    if (useAPI) {
+                        const apiUrl = apiUrlInput.value;
+                        result = await solveWithAPI(originalBoard, apiUrl);
+                    } else {
+                        const solver = new SudokuSolver();
+                        result = solver.solve(originalBoard);
+                    }
                     
                     if (result.solved) {
                         solvedBoard = result.solution;
@@ -937,7 +1078,7 @@
                         totalSolved++;
                         totalTime += result.time;
                         
-                        updateStatus(`[${currentIteration}/${totalIterations}] ¡Resuelto! ${result.steps} pasos en ${result.time.toFixed(2)} ms`, "success");
+                        updateStatus(`[${currentIteration}/${totalIterations}] ¡Resuelto! ${result.steps} pasos en ${result.time.toFixed(2)} ms (${result.method})`, "success");
                     } else {
                         totalErrors++;
                         updateStatus(`[${currentIteration}/${totalIterations}] Error: No se pudo resolver`, "error");
@@ -990,7 +1131,7 @@
             
             extractBtn.disabled = false;
             solveBtn.disabled = originalBoard === null;
-            stepBtn.disabled = originalBoard === null;
+            stepBtn.disabled = originalBoard === null || document.querySelector('input[name="solverMethod"]:checked').value === 'api';
             restoreBtn.disabled = originalBoard === null || solvedBoard === null;
             newBtn.disabled = false;
             autoBtn.disabled = false;
@@ -1017,7 +1158,7 @@
                 previewArea.style.display = 'block';
 
                 solveBtn.disabled = false;
-                stepBtn.disabled = false;
+                stepBtn.disabled = document.querySelector('input[name="solverMethod"]:checked').value === 'api';
 
                 updateStatus("Sudoku extraído correctamente. Ahora puedes resolverlo.", "success");
 
@@ -1033,24 +1174,33 @@
                 return;
             }
 
+            const useAPI = document.querySelector('input[name="solverMethod"]:checked').value === 'api';
+            
             solveBtn.disabled = true;
             stepBtn.disabled = true;
             extractBtn.disabled = true;
             solveBtn.textContent = "Resolviendo...";
 
-            updateStatus("Resolviendo sudoku con backtracking...", "info");
+            updateStatus(useAPI ? "Enviando a la API..." : "Resolviendo sudoku con backtracking...", "info");
 
             setTimeout(async () => {
                 try {
-                    const solver = new SudokuSolver();
-                    const result = solver.solve(originalBoard);
+                    let result;
+                    
+                    if (useAPI) {
+                        const apiUrl = apiUrlInput.value;
+                        result = await solveWithAPI(originalBoard, apiUrl);
+                    } else {
+                        const solver = new SudokuSolver();
+                        result = solver.solve(originalBoard);
+                    }
 
                     if (result.solved) {
                         solvedBoard = result.solution;
 
                         printBoardToConsole(solvedBoard, "Sudoku Resuelto");
 
-                        if (animationCheckbox.checked) {
+                        if (!useAPI && animationCheckbox.checked) {
                             const animMinDelay = parseInt(animMinDelayInput.value) || 50;
                             const animMaxDelay = parseInt(animMaxDelayInput.value) || 200;
                             await displaySolutionWithAnimation(originalBoard, solvedBoard, animMinDelay, animMaxDelay);
@@ -1063,20 +1213,25 @@
 
                         updateStats(result);
 
-                        updateStatus(`¡Sudoku resuelto! ${result.steps} pasos en ${result.time.toFixed(2)} ms`, "success");
+                        updateStatus(`¡Sudoku resuelto! ${result.steps} pasos en ${result.time.toFixed(2)} ms (${result.method})`, "success");
 
                         restoreBtn.disabled = false;
 
                         console.log("Sudoku resuelto exitosamente.");
                     } else {
-                        updateStatus("No se pudo resolver el sudoku. Puede que no tenga solución.", "error");
+                        updateStatus(`No se pudo resolver el sudoku. ${result.message || ''}`, "error");
                     }
                 } catch (error) {
                     console.error("Error al resolver:", error);
                     updateStatus(`Error: ${error.message}`, "error");
+                    
+                    // Si falla la API, sugerir usar método local
+                    if (useAPI) {
+                        updateStatus("¿Quieres intentar con el método local?", "info");
+                    }
                 } finally {
                     solveBtn.disabled = false;
-                    stepBtn.disabled = false;
+                    stepBtn.disabled = useAPI || originalBoard === null;
                     extractBtn.disabled = false;
                     solveBtn.textContent = "Resolver";
                 }
@@ -1086,6 +1241,12 @@
         stepBtn.addEventListener('click', async function() {
             if (!originalBoard) {
                 updateStatus("Primero extrae el sudoku.", "error");
+                return;
+            }
+
+            // Paso a paso solo funciona con método local
+            if (document.querySelector('input[name="solverMethod"]:checked').value === 'api') {
+                updateStatus("El modo paso a paso solo está disponible con el método local.", "error");
                 return;
             }
 
