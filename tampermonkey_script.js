@@ -562,6 +562,7 @@
             <button id="solveBtn" class="sudoku-solver-btn blue" disabled>Resolver</button>
             <button id="stepBtn" class="sudoku-solver-btn orange" disabled>Paso a Paso</button>
             <button id="restoreBtn" class="sudoku-solver-btn" disabled>Restaurar Original</button>
+            <button id="newBtn" class="sudoku-solver-btn" >Nuevo</button>
 
             <div id="previewArea" style="display: none;">
                 <div style="margin: 10px 0 5px 0; font-size: 13px; font-weight: bold;">Vista previa:</div>
@@ -577,6 +578,7 @@
         const solveBtn = document.getElementById('solveBtn');
         const stepBtn = document.getElementById('stepBtn');
         const restoreBtn = document.getElementById('restoreBtn');
+        const newBtn = document.getElementById('newBtn');
         const statusDiv = document.getElementById('sudokuStatus');
         const previewArea = document.getElementById('previewArea');
         const previewContainer = document.getElementById('previewContainer');
@@ -759,6 +761,11 @@
                 updateStats(null);
                 updateStatus("Sudoku restaurado a su estado original.", "info");
             }
+        });
+
+        // Nuevo sudoku (recargar página)
+        newBtn.addEventListener('click', function() {
+            sudo_nuevo();
         });
     }
 
