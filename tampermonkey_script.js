@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Solucionador de Sudoku con Backtracking y API
 // @namespace    http://tampermonkey.net/
-// @version      5.0
+// @version      5.1
 // @description  Extrae y resuelve sudokus usando backtracking local o API externa con animación opcional
 // @author       Asistente de Código
 // @match *://*.sudoku-online.org/*
@@ -316,6 +316,34 @@
             cursor: pointer;
         }
 
+        /* Combinaciones info */
+        .sudoku-solver-combinations {
+            font-size: 12px;
+            color: #333;
+            margin-bottom: 10px;
+            padding: 8px;
+            background-color: #f0f8ff;
+            border-radius: 4px;
+            border-left: 4px solid #2196F3;
+        }
+
+        .sudoku-solver-combinations .label {
+            font-weight: bold;
+            color: #1976D2;
+        }
+
+        .sudoku-solver-combinations .value {
+            font-weight: bold;
+            color: #4CAF50;
+        }
+
+        .sudoku-solver-combinations .note {
+            font-size: 11px;
+            color: #666;
+            margin-top: 3px;
+            font-style: italic;
+        }
+
         /* Scrollbar personalizada */
         .sudoku-solver-panel::-webkit-scrollbar {
             width: 8px;
@@ -507,6 +535,77 @@
                 }
             }
             return count;
+        }
+
+        countSolutions(board, maxSolutions = 100) {
+            this.steps = 0;
+            this.startTime = performance.now();
+            let solutionCount = 0;
+            const solutions = [];
+
+            const solveRecursiveCount = (board) => {
+                this.steps++;
+
+                // Límite de tiempo y soluciones
+                if (performance.now() - this.startTime > 1000) { // 1 segundo máximo
+                    return false;
+                }
+
+                if (solutionCount >= maxSolutions) {
+                    return false;
+                }
+
+                let emptySpot = this.nextEmptySpot(board);
+                let row = emptySpot[0];
+                let col = emptySpot[1];
+
+                if (row === -1) {
+                    solutions.push(JSON.parse(JSON.stringify(board)));
+                    solutionCount++;
+                    return true;
+                }
+
+                for (let num = 1; num <= 9 && solutionCount < maxSolutions; num++) {
+                    if (this.checkValue(board, row, col, num)) {
+                        board[row][col] = num;
+
+                        solveRecursiveCount(board);
+
+                        board[row][col] = 0;
+                    }
+                }
+
+                return false;
+            };
+
+            const boardCopy = JSON.parse(JSON.stringify(board));
+            solveRecursiveCount(boardCopy);
+
+            const endTime = performance.now();
+
+            return {
+                count: solutionCount,
+                estimatedTotal: this.estimateTotalSolutions(board, solutionCount),
+                steps: this.steps,
+                time: endTime - this.startTime,
+                limited: solutionCount >= maxSolutions,
+                timeout: (endTime - this.startTime) >= 1000
+            };
+        }
+
+        estimateTotalSolutions(board, foundSolutions) {
+            const emptyCells = 81 - this.countFilledCells(board);
+            
+            if (emptyCells <= 20) {
+                // Para tableros con pocas celdas vacías, podemos estimar mejor
+                return foundSolutions;
+            } else if (emptyCells <= 40) {
+                // Estimación simple basada en celdas vacías
+                return Math.min(foundSolutions * 10, 1000000);
+            } else {
+                // Demasiadas celdas vacías para estimar
+                return "más de " + (foundSolutions * 100);
+            }
         }
     }
 
@@ -807,6 +906,35 @@
         return container;
     }
 
+    function createCombinationsInfo(board, combinationsData = null) {
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'sudoku-solver-combinations';
+        
+        const filledCells = board.flat().filter(cell => cell !== 0).length;
+        const emptyCells = 81 - filledCells;
+        
+        let infoHTML = `<span class="label">Celdas llenas:</span> <span class="value">${filledCells}/81</span>`;
+        infoHTML += ` | <span class="label">Vacías:</span> <span class="value">${emptyCells}</span>`;
+        
+        if (combinationsData) {
+            if (combinationsData.timeout) {
+                infoHTML += `<br><span class="label">Combinaciones estimadas:</span> <span class="value">${combinationsData.estimatedTotal}</span>`;
+                infoHTML += `<div class="note">(cálculo limitado por tiempo, estimación aproximada)</div>`;
+            } else if (combinationsData.limited) {
+                infoHTML += `<br><span class="label">Combinaciones encontradas:</span> <span class="value">≥ ${combinationsData.count}</span>`;
+                infoHTML += `<div class="note">(mínimo ${combinationsData.count} soluciones únicas encontradas en ${combinationsData.steps} pasos)</div>`;
+            } else {
+                infoHTML += `<br><span class="label">Combinaciones estimadas:</span> <span class="value">${combinationsData.estimatedTotal}</span>`;
+                infoHTML += `<div class="note">(${combinationsData.count} soluciones encontradas en ${combinationsData.steps} pasos, ${combinationsData.time.toFixed(0)} ms)</div>`;
+            }
+        } else {
+            infoHTML += `<div class="note">Haz clic en "Calcular Combinaciones" para estimar soluciones posibles</div>`;
+        }
+        
+        infoDiv.innerHTML = infoHTML;
+        return infoDiv;
+    }
+
     // ==============================================
     // INTERFAZ DE USUARIO
     // ==============================================
@@ -829,6 +957,7 @@
                     <button id="stepBtn" class="sudoku-solver-btn orange" disabled>Paso a Paso</button>
                     <button id="restoreBtn" class="sudoku-solver-btn" disabled>Restaurar</button>
                     <button id="newBtn" class="sudoku-solver-btn">Nuevo</button>
+                    <button id="calcCombinationsBtn" class="sudoku-solver-btn" disabled>Calcular Combinaciones</button>
                 </div>
             </div>
 
@@ -850,7 +979,7 @@
                     <div class="sudoku-solver-animation-controls">
                         <div class="sudoku-solver-animation-option">
                             <label for="animationCheckbox">Usar animación:</label>
-                            <input type="checkbox" id="animationCheckbox">
+                            <input type="checkbox" id="animationCheckbox" checked>
                         </div>
                         <div id="animationSettings">
                             <div class="sudoku-solver-input-group">
@@ -906,6 +1035,7 @@
             <div class="sudoku-solver-preview-section">
                 <div id="previewArea" style="display: none;">
                     <div class="sudoku-solver-section-title">Vista Previa</div>
+                    <div id="combinationsInfo"></div>
                     <div id="previewContainer"></div>
                     <div id="statsContainer" class="sudoku-solver-stats"></div>
                 </div>
@@ -919,6 +1049,7 @@
         const stepBtn = document.getElementById('stepBtn');
         const restoreBtn = document.getElementById('restoreBtn');
         const newBtn = document.getElementById('newBtn');
+        const calcCombinationsBtn = document.getElementById('calcCombinationsBtn');
         const autoBtn = document.getElementById('autoBtn');
         const stopBtn = document.getElementById('stopBtn');
         const animationCheckbox = document.getElementById('animationCheckbox');
@@ -934,6 +1065,7 @@
         const previewArea = document.getElementById('previewArea');
         const previewContainer = document.getElementById('previewContainer');
         const statsContainer = document.getElementById('statsContainer');
+        const combinationsInfo = document.getElementById('combinationsInfo');
         const autoStatsDiv = document.getElementById('autoStats');
         const solverMethodRadios = document.querySelectorAll('input[name="solverMethod"]');
 
@@ -945,11 +1077,15 @@
         let totalSolved = 0;
         let totalErrors = 0;
         let totalTime = 0;
+        let currentCombinationsData = null;
 
         // Mostrar/ocultar configuración de animación
         animationCheckbox.addEventListener('change', function() {
             animationSettings.style.display = this.checked ? 'block' : 'none';
         });
+
+        // Inicializar visibilidad de animación
+        animationSettings.style.display = animationCheckbox.checked ? 'block' : 'none';
 
         // Actualizar visibilidad de controles según método seleccionado
         function updateControlsVisibility() {
@@ -961,14 +1097,8 @@
             // Mostrar/ocultar configuración de API
             document.querySelector('.sudoku-solver-api-controls').style.display = useAPI ? 'block' : 'none';
             
-            // Si es API, deshabilitar animación (puede que la API no la soporte)
-            if (useAPI) {
-                animationCheckbox.checked = false;
-                animationCheckbox.disabled = true;
-                animationSettings.style.display = 'none';
-            } else {
-                animationCheckbox.disabled = false;
-            }
+            // Animación siempre disponible, incluso con API
+            animationCheckbox.disabled = false;
         }
 
         // Inicializar visibilidad de controles
@@ -1009,6 +1139,47 @@
             statusDiv.className = `sudoku-solver-status sudoku-solver-${type}`;
         }
 
+        function updatePreview(board, isOriginal = true, combinationsData = null) {
+            previewContainer.innerHTML = '';
+            previewContainer.appendChild(createPreview(board, isOriginal));
+            
+            combinationsInfo.innerHTML = '';
+            combinationsInfo.appendChild(createCombinationsInfo(board, combinationsData));
+        }
+
+        async function calculateCombinations() {
+            if (!originalBoard) {
+                updateStatus("Primero extrae el sudoku.", "error");
+                return;
+            }
+
+            calcCombinationsBtn.disabled = true;
+            calcCombinationsBtn.textContent = "Calculando...";
+            
+            updateStatus("Calculando combinaciones posibles... (máximo 1 segundo)", "info");
+            
+            setTimeout(async () => {
+                try {
+                    const solver = new SudokuSolver();
+                    currentCombinationsData = solver.countSolutions(originalBoard, 100);
+                    
+                    updatePreview(originalBoard, true, currentCombinationsData);
+                    
+                    if (currentCombinationsData.timeout) {
+                        updateStatus("Cálculo de combinaciones interrumpido por tiempo. Resultado estimado.", "warning");
+                    } else {
+                        updateStatus(`Combinaciones calculadas: ${currentCombinationsData.estimatedTotal} estimadas`, "success");
+                    }
+                } catch (error) {
+                    console.error("Error al calcular combinaciones:", error);
+                    updateStatus(`Error: ${error.message}`, "error");
+                } finally {
+                    calcCombinationsBtn.disabled = false;
+                    calcCombinationsBtn.textContent = "Calcular Combinaciones";
+                }
+            }, 10);
+        }
+
         async function startAutoMode() {
             if (autoModeActive) return;
             
@@ -1016,7 +1187,7 @@
             
             totalIterations = parseInt(autoCountInput.value) || 100;
             const delay = parseInt(autoDelayInput.value) || 3000;
-            const useAnimation = autoAnimationCheckbox.checked && !useAPI;
+            const useAnimation = autoAnimationCheckbox.checked;
             const animMinDelay = parseInt(animMinDelayInput.value) || 50;
             const animMaxDelay = parseInt(animMaxDelayInput.value) || 200;
             
@@ -1036,6 +1207,7 @@
             stepBtn.disabled = true;
             restoreBtn.disabled = true;
             newBtn.disabled = true;
+            calcCombinationsBtn.disabled = true;
             autoBtn.disabled = true;
             stopBtn.disabled = false;
             autoCountInput.disabled = true;
@@ -1056,6 +1228,9 @@
                 try {
                     originalBoard = extractSudoku();
                     
+                    // Actualizar vista previa para el juego actual
+                    updatePreview(originalBoard, true);
+                    
                     let result;
                     
                     if (useAPI) {
@@ -1074,6 +1249,9 @@
                         } else {
                             displaySolution(originalBoard, solvedBoard);
                         }
+                        
+                        // Actualizar vista previa con solución
+                        updatePreview(solvedBoard, false);
                         
                         totalSolved++;
                         totalTime += result.time;
@@ -1134,6 +1312,7 @@
             stepBtn.disabled = originalBoard === null || document.querySelector('input[name="solverMethod"]:checked').value === 'api';
             restoreBtn.disabled = originalBoard === null || solvedBoard === null;
             newBtn.disabled = false;
+            calcCombinationsBtn.disabled = originalBoard === null;
             autoBtn.disabled = false;
             stopBtn.disabled = true;
             autoCountInput.disabled = false;
@@ -1153,12 +1332,12 @@
                 originalBoard = extractSudoku();
                 printBoardToConsole(originalBoard, "Sudoku Original");
 
-                previewContainer.innerHTML = '';
-                previewContainer.appendChild(createPreview(originalBoard, true));
                 previewArea.style.display = 'block';
+                updatePreview(originalBoard, true);
 
                 solveBtn.disabled = false;
                 stepBtn.disabled = document.querySelector('input[name="solverMethod"]:checked').value === 'api';
+                calcCombinationsBtn.disabled = false;
 
                 updateStatus("Sudoku extraído correctamente. Ahora puedes resolverlo.", "success");
 
@@ -1179,6 +1358,7 @@
             solveBtn.disabled = true;
             stepBtn.disabled = true;
             extractBtn.disabled = true;
+            calcCombinationsBtn.disabled = true;
             solveBtn.textContent = "Resolviendo...";
 
             updateStatus(useAPI ? "Enviando a la API..." : "Resolviendo sudoku con backtracking...", "info");
@@ -1200,7 +1380,7 @@
 
                         printBoardToConsole(solvedBoard, "Sudoku Resuelto");
 
-                        if (!useAPI && animationCheckbox.checked) {
+                        if (animationCheckbox.checked) {
                             const animMinDelay = parseInt(animMinDelayInput.value) || 50;
                             const animMaxDelay = parseInt(animMaxDelayInput.value) || 200;
                             await displaySolutionWithAnimation(originalBoard, solvedBoard, animMinDelay, animMaxDelay);
@@ -1208,9 +1388,7 @@
                             displaySolution(originalBoard, solvedBoard);
                         }
 
-                        previewContainer.innerHTML = '';
-                        previewContainer.appendChild(createPreview(solvedBoard));
-
+                        updatePreview(solvedBoard, false);
                         updateStats(result);
 
                         updateStatus(`¡Sudoku resuelto! ${result.steps} pasos en ${result.time.toFixed(2)} ms (${result.method})`, "success");
@@ -1233,6 +1411,7 @@
                     solveBtn.disabled = false;
                     stepBtn.disabled = useAPI || originalBoard === null;
                     extractBtn.disabled = false;
+                    calcCombinationsBtn.disabled = false;
                     solveBtn.textContent = "Resolver";
                 }
             }, 10);
@@ -1253,6 +1432,7 @@
             solveBtn.disabled = true;
             stepBtn.disabled = true;
             extractBtn.disabled = true;
+            calcCombinationsBtn.disabled = true;
             stepBtn.textContent = "Resolviendo...";
 
             updateStatus("Resolviendo paso a paso (puede tomar unos segundos)...", "info");
@@ -1265,8 +1445,7 @@
                     stepCount = steps;
 
                     if (steps % 200 === 0) {
-                        previewContainer.innerHTML = '';
-                        previewContainer.appendChild(createPreview(board));
+                        updatePreview(board, false);
                         updateStatus(`Resolviendo... ${steps} pasos`, "info");
 
                         await new Promise(resolve => setTimeout(resolve, 10));
@@ -1284,9 +1463,7 @@
                         displaySolution(originalBoard, solvedBoard);
                     }
 
-                    previewContainer.innerHTML = '';
-                    previewContainer.appendChild(createPreview(solvedBoard));
-
+                    updatePreview(solvedBoard, false);
                     updateStats(result);
 
                     updateStatus(`¡Sudoku resuelto paso a paso! ${result.steps} pasos en ${result.time.toFixed(2)} ms`, "success");
@@ -1302,6 +1479,7 @@
                 solveBtn.disabled = false;
                 stepBtn.disabled = false;
                 extractBtn.disabled = false;
+                calcCombinationsBtn.disabled = false;
                 stepBtn.textContent = "Paso a Paso";
             }
         });
@@ -1309,8 +1487,7 @@
         restoreBtn.addEventListener('click', function() {
             if (originalBoard) {
                 restoreOriginal(originalBoard);
-                previewContainer.innerHTML = '';
-                previewContainer.appendChild(createPreview(originalBoard, true));
+                updatePreview(originalBoard, true);
                 updateStats(null);
                 updateStatus("Sudoku restaurado a su estado original.", "info");
             }
@@ -1322,6 +1499,8 @@
                 updateStatus("Cargando nuevo sudoku...", "info");
             }
         });
+
+        calcCombinationsBtn.addEventListener('click', calculateCombinations);
 
         autoBtn.addEventListener('click', function() {
             if (!autoModeActive) {
